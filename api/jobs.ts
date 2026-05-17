@@ -118,7 +118,7 @@ async function fetchLatestJobs(isFull: boolean = false) {
         const timestamp = Date.now();
         const response = await axios.get(`${source.baseUrl}&per_page=100&page=${page}&_t=${timestamp}`, { 
           httpsAgent, 
-          timeout: 20000,
+          timeout: 40000,
           headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
         });
         
@@ -323,7 +323,7 @@ async function fetchSingleJob(id: string) {
   try {
     const response = await axios.get(`https://bdgovtjob.net/wp-json/wp/v2/posts/${id}?_embed`, {
       httpsAgent,
-      timeout: 20000,
+      timeout: 40000,
       headers: { 'User-Agent': 'Mozilla/5.0' }
     });
 

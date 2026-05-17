@@ -448,7 +448,8 @@ export default function App() {
         canonical.setAttribute('rel', 'canonical');
         document.head.appendChild(canonical);
       }
-      canonical.setAttribute('href', domain + (url.pathname === '/' ? '' : url.pathname));
+      const canonicalUrl = url.pathname === '/' ? domain + '/' : domain + url.pathname;
+      canonical.setAttribute('href', canonicalUrl);
 
       // JSON-LD for Google Jobs
       const existingScript = document.getElementById('job-jsonld');
@@ -503,9 +504,10 @@ export default function App() {
       
       // Reset Canonical Link to Home
       const domain = window.location.hostname.includes('localhost') ? window.location.origin : 'https://jobs.talukdaracademy.com.bd';
+      const canonicalUrl = domain + '/';
       let canonical = document.querySelector('link[rel="canonical"]');
       if (canonical) {
-        canonical.setAttribute('href', domain);
+        canonical.setAttribute('href', canonicalUrl);
       }
 
       // Only clear the URL if it actually has a job param/path and we explicitly want to clear it (not just initial state)
@@ -573,7 +575,10 @@ export default function App() {
   }, [favorites]);
 
   const toggleFavorite = (id: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     setFavorites(prev => 
       prev.includes(id) ? prev.filter(fid => fid !== id) : [...prev, id]
     );
@@ -1438,6 +1443,7 @@ export default function App() {
                           <div className="flex items-center gap-2">
                             <button 
                               onClick={(e) => {
+                                e.preventDefault();
                                 e.stopPropagation();
                                 const shareUrl = `${window.location.origin}/${job.slug || generateSlug(job.title, job.organization)}`;
                                 if (navigator.share) {

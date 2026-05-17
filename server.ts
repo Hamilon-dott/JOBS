@@ -315,7 +315,7 @@ async function fetchLatestJobs(isFull: boolean = false) {
 
         const response = await axios.get(`${source.baseUrl}&per_page=100&page=${page}`, { 
           httpsAgent, 
-          timeout: 20000,
+          timeout: 40000,
           headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
         });
         
@@ -467,7 +467,11 @@ async function fetchLatestJobs(isFull: boolean = false) {
         }
       }
     } catch (e: any) {
-      console.error(`${source.name} API failed:`, e.response?.status, e.message);
+      if (e.code === 'ECONNABORTED' || e.message?.includes('timeout') || e.message?.includes('aborted')) {
+        console.error(`${source.name} API timed out or aborted.`);
+      } else {
+        console.error(`${source.name} API failed:`, e.response?.status, e.message);
+      }
     }
   }
 
