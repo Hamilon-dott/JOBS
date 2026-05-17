@@ -341,7 +341,7 @@ export default function App() {
 
     const handlePopState = (e: PopStateEvent) => {
       const urlParams = new URLSearchParams(window.location.search);
-      const pathMatch = window.location.pathname.match(/^\/([^/]+)$/);
+      const pathMatch = window.location.pathname.match(/^\/([^/]+)\/?$/);
       const jobId = pathMatch ? pathMatch[1] : urlParams.get('job');
 
       if (activePageRef.current !== 'home') {
@@ -430,7 +430,7 @@ export default function App() {
       
       // Update URL without reloading
       const url = new URL(window.location.href);
-      const pathMatch = url.pathname.match(/^\/([^/]+)$/);
+      const pathMatch = url.pathname.match(/^\/([^/]+)\/?$/);
       const currentId = pathMatch ? pathMatch[1] : url.searchParams.get('job');
       
       const jobSlug = selectedJob.slug || generateSlug(selectedJob.title, selectedJob.organization);
@@ -511,7 +511,7 @@ export default function App() {
       }
 
       // Only clear the URL if it actually has a job param/path and we explicitly want to clear it (not just initial state)
-      const pathMatch = url.pathname.match(/^\/([^/]+)$/);
+      const pathMatch = url.pathname.match(/^\/([^/]+)\/?$/);
       const urlJobId = pathMatch ? pathMatch[1] : url.searchParams.get('job');
 
       if (urlJobId) {
@@ -543,7 +543,7 @@ export default function App() {
     // Initial deep link check
     const checkDeepLink = async () => {
       const urlParams = new URLSearchParams(window.location.search);
-      const pathMatch = window.location.pathname.match(/^\/([^/]+)$/);
+      const pathMatch = window.location.pathname.match(/^\/([^/]+)\/?$/);
       const jobId = pathMatch ? pathMatch[1] : urlParams.get('job');
       
       if (jobId) {

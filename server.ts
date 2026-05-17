@@ -120,20 +120,33 @@ Sitemap: ${baseUrl}/sitemap.xml`);
           return res.sendFile(path.join(distPath, 'index.html'));
         }
         const host = req.get('host')?.includes('localhost') ? `${req.protocol}://${req.get('host')}` : 'https://jobs.talukdaracademy.com.bd';
-        let canonicalUrl = host + req.path;
+        
+        let reqPath = req.path;
+        if (reqPath === '/index.html') {
+          reqPath = '/';
+        }
+
+        let canonicalUrl = host + reqPath;
         
         let updatedHtml = data;
         let pageTitle = "Jobs.talukdaracademy.com.bd - BD Govt Job Circular 2026";
         let pageDescription = "Find the latest Govt and Bank jobs in Bangladesh.";
         
+        // Always strip the static canonical tag from index.html so we can replace it dynamically
+        updatedHtml = updatedHtml.replace(/<link\s+rel="canonical"\s+href="[^"]*"\s*\/?>/gi, '');
+
         // Handle specific job pages
-        const jobMatch = req.path.match(/^\/([^/]+)$/);
+        const jobMatch = req.path.match(/^\/([^/]+)\/?$/);
         if (jobMatch) {
-          const jobSlug = jobMatch[1];
+          const jobSlugUrl = jobMatch[1];
           try {
             const jobs = await fetchLatestJobs(true);
-            const job = jobs.find(j => (j.slug === jobSlug) || (j.id === jobSlug) || (generateSlug(j.title, j.organization) === jobSlug));
+            const job = jobs.find(j => (j.slug === jobSlugUrl) || (j.id === jobSlugUrl) || (generateSlug(j.title, j.organization) === jobSlugUrl));
             if (job) {
+              // ALWAYS set canonical to the standard slug, not necessarily the path requested
+              const standardSlug = job.slug || generateSlug(job.title, job.organization);
+              canonicalUrl = `${host}/${standardSlug}`;
+              
               const cleanedTitle = job.title.replace(/[<>&'"]/g, '');
               const cleanedOrg = (job.organization || '').replace(/[<>&'"]/g, '');
               pageTitle = `${cleanedTitle} - ${cleanedOrg}`;
@@ -196,7 +209,6 @@ Sitemap: ${baseUrl}/sitemap.xml`);
           }
         } else {
           // Homepage or other pages
-          updatedHtml = updatedHtml.replace(/<link\s+rel="canonical"\s+href="[^"]*"\s*\/?>/gi, '');
           updatedHtml = updatedHtml.replace('</head>', `  <link rel="canonical" href="${canonicalUrl}">\n  </head>`);
         }
         
