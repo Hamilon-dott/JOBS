@@ -1446,17 +1446,23 @@ export default function App() {
                                 e.preventDefault();
                                 e.stopPropagation();
                                 const shareUrl = `${window.location.origin}/${job.slug || generateSlug(job.title, job.organization)}`;
+                                
+                                const fallbackCopy = () => {
+                                  navigator.clipboard.writeText(shareUrl)
+                                    .then(() => alert('লিঙ্কটি কপি করা হয়েছে! (Link Copied!)'))
+                                    .catch(() => alert('শেয়ার লিঙ্ক কপি করা সম্ভব হয়নি।'));
+                                };
+
                                 if (navigator.share) {
                                   navigator.share({
                                     title: job.title,
                                     text: `${job.organization} - Job Circular`,
                                     url: shareUrl
-                                  }).catch(() => {});
+                                  }).catch(() => {
+                                    fallbackCopy();
+                                  });
                                 } else {
-                                  // Fallback: Copy to clipboard
-                                  navigator.clipboard.writeText(shareUrl)
-                                    .then(() => alert('লিঙ্কটি কপি করা হয়েছে! (Link Copied!)'))
-                                    .catch(() => alert('শেয়ার লিঙ্ক কপি করা সম্ভব হয়নি।'));
+                                  fallbackCopy();
                                 }
                               }}
                               className="p-2 rounded-full text-[#94a3b8] hover:bg-slate-100 hover:text-[#3b82f6] transition-all duration-200"
