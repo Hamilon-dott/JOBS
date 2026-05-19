@@ -527,7 +527,7 @@ async function fetchLatestJobs(isFull: boolean = false) {
               const pubDate = new Date(post.date);
               jobs.push({
                 id: `${post.id}`,
-                slug: generateSlug(titleText, orgName, `${post.id}`),
+                slug: generateSlug(titleText, orgName, post.slug ? post.slug.toString() : `${post.id}`),
                 title: titleText,
                 organization: orgName,
                 publishedDate: pubDate.toISOString(), // Standard ISO format
