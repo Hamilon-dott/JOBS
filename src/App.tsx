@@ -278,6 +278,33 @@ const AdComponent = () => {
   );
 };
 
+function FacebookComments({ url }: { url: string }) {
+  useEffect(() => {
+    let attempts = 0;
+    const interval = setInterval(() => {
+      if ((window as any).FB) {
+        (window as any).FB.XFBML.parse();
+        clearInterval(interval);
+      }
+      attempts++;
+      if (attempts > 10) clearInterval(interval); // give up after 5 seconds
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [url]);
+
+  return (
+    <div className="w-full overflow-hidden flex justify-center" key={url}>
+      <div 
+        className="fb-comments" 
+        data-href={url} 
+        data-width="100%" 
+        data-numposts="5"
+      ></div>
+    </div>
+  );
+}
+
 export default function App() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
@@ -472,26 +499,29 @@ export default function App() {
 
       const jobSchema = {
         "@context": "https://schema.org/",
-        "@type": "JobPosting",
-        "title": selectedJob.title,
+        "@type": "NewsArticle",
+        "headline": selectedJob.title,
         "description": selectedJob.content || selectedJob.title,
-        "datePosted": formatISO(selectedJob.publishedDate),
-        "validThrough": (selectedJob as any).deadlineISO || undefined,
-        "employmentType": "FULL_TIME",
-        "hiringOrganization": {
+        "datePublished": formatISO(selectedJob.publishedDate),
+        "dateModified": formatISO(selectedJob.publishedDate),
+        "author": {
           "@type": "Organization",
-          "name": selectedJob.organization,
-          "logo": BD_GOVT_LOGO
+          "name": "BD Govt Job Circular"
         },
-        "url": domain + url.pathname,
-        "jobLocation": {
-          "@type": "Place",
-          "address": {
-            "@type": "PostalAddress",
-            "addressLocality": selectedJob.location || "Bangladesh",
-            "addressRegion": "BD",
-            "addressCountry": "BD"
+        "publisher": {
+          "@type": "Organization",
+          "name": "BD Govt Job Circular",
+          "logo": {
+            "@type": "ImageObject",
+            "url": BD_GOVT_LOGO
           }
+        },
+        "image": [
+          selectedJob.imageUrls?.[0] || 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/84/Government_Seal_of_Bangladesh.svg/1200px-Government_Seal_of_Bangladesh.svg.png'
+        ],
+        "mainEntityOfPage": {
+          "@type": "WebPage",
+          "@id": domain + url.pathname
         }
       };
       
@@ -939,6 +969,11 @@ export default function App() {
         ogUrl.setAttribute('content', window.location.href);
       }
 
+      setTimeout(() => {
+        if ((window as any).FB) {
+          (window as any).FB.XFBML.parse();
+        }
+      }, 500);
     } else {
       document.title = 'Jobs.talukdaracademy.com.bd - BD Govt Job Circular 2026 | All Govt Jobs BD';
       const metaDescription = document.querySelector('meta[name="description"]');
@@ -1629,7 +1664,36 @@ export default function App() {
                         </div>
                       </div>
 
-                      <div className="flex items-center">
+                      <div className="flex items-center gap-2">
+                        <button 
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const shareUrl = `${window.location.origin}/${selectedJob.slug || generateSlug(selectedJob.title, selectedJob.organization)}`;
+                            
+                            const fallbackCopy = () => {
+                              navigator.clipboard.writeText(shareUrl)
+                                .then(() => alert('লিঙ্কটি কপি করা হয়েছে! (Link Copied!)'))
+                                .catch(() => alert('শেয়ার লিঙ্ক কপি করা সম্ভব হয়নি।'));
+                            };
+
+                            if (navigator.share) {
+                              navigator.share({
+                                title: selectedJob.title,
+                                text: `${selectedJob.organization} - Job Circular`,
+                                url: shareUrl
+                              }).catch(() => {
+                                fallbackCopy();
+                              });
+                            } else {
+                              fallbackCopy();
+                            }
+                          }}
+                          className="w-9 h-9 md:w-11 md:h-11 flex items-center justify-center rounded-lg md:rounded-xl transition-all duration-300 border shadow-sm active:scale-90 bg-white text-slate-400 border-slate-200 hover:bg-slate-50 hover:text-blue-500"
+                          title="Share Selected Job"
+                        >
+                          <Share2 size={20} />
+                        </button>
                         <button 
                           onClick={(e) => toggleFavorite(selectedJob.id, e)}
                           className={cn(
@@ -1744,6 +1808,8 @@ export default function App() {
                                         alt={`Circular ${idx + 1}`} 
                                         className="w-full h-auto object-contain max-h-[1200px] rounded-lg"
                                         referrerPolicy="no-referrer"
+                                        loading="lazy"
+                                        decoding="async"
                                       />
                                     </Zoom>
                                   </div>
@@ -1870,6 +1936,12 @@ export default function App() {
                             <span className="text-xl shrink-0">⚠️</span>
                             <span><strong>সতর্কতা:</strong> আমরা বিভিন্ন বিশ্বস্ত মাধ্যম থেকে তথ্য সংগ্রহ করে সহজভাবে উপস্থাপন করি, আবেদনের পূর্বে মূল বিজ্ঞপ্তি যাচাই করে নিন।</span>
                           </p>
+                        </div>
+                        
+                        {/* Facebook Comments */}
+                        <div className="mt-8 bg-white p-4 md:p-6 rounded-xl border border-slate-200 shadow-sm">
+                          <h3 className="text-lg font-bold text-slate-800 mb-4 border-b border-slate-100 pb-2">মতামত দিন</h3>
+                          <FacebookComments url={`${window.location.origin}/${selectedJob.slug || generateSlug(selectedJob.title, selectedJob.organization)}`} />
                         </div>
                       </motion.div>
                     )}

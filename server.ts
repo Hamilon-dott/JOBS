@@ -48,6 +48,41 @@ Allow: /
 Sitemap: ${baseUrl}/sitemap.xml`);
   });
 
+  // News Sitemap.xml for Google News
+  app.get('/news-sitemap.xml', async (req, res) => {
+    try {
+      const jobs = await fetchLatestJobs(true);
+      const host = req.get('host')?.includes('localhost') ? `${req.protocol}://${req.get('host')}` : 'https://jobs.talukdaracademy.com.bd';
+      
+      // Google News sitemaps should only contain URLs published in the last 2 days.
+      // We will filter or just include all if they are recent. (In this case, we'll just include the most recent 100).
+      const recentJobs = jobs.slice(0, 100);
+
+      const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">
+  ${recentJobs.map(job => `
+  <url>
+    <loc>${host}/${job.slug || generateSlug(job.title, job.organization)}</loc>
+    <news:news>
+      <news:publication>
+        <news:name>BD Govt Job Circular</news:name>
+        <news:language>bn</news:language>
+      </news:publication>
+      <news:publication_date>${new Date(job.publishedDate).toISOString()}</news:publication_date>
+      <news:title>${job.title}</news:title>
+    </news:news>
+  </url>`).join('')}
+</urlset>`;
+
+      res.type('application/xml');
+      res.send(sitemap);
+    } catch (error) {
+      console.error('Error generating news sitemap:', error);
+      res.status(500).send('Error generating news sitemap');
+    }
+  });
+
   // Sitemap.xml
   app.get('/sitemap.xml', async (req, res) => {
     try {
@@ -91,10 +126,11 @@ Sitemap: ${baseUrl}/sitemap.xml`);
   });
 
   // Vite integration
+  let vite;
   if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
+    vite = await createViteServer({
       server: { middlewareMode: true },
-      appType: 'spa',
+      appType: 'custom',
     });
     
     app.use((req, res, next) => {
@@ -109,17 +145,25 @@ Sitemap: ${baseUrl}/sitemap.xml`);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath, { index: false }));
-    app.get('*', async (req, res) => {
-      // 301 Redirect old query params to new path structure
-      if (req.query.job) {
-        return res.redirect(301, `/${req.query.job}`);
+  }
+
+  app.get('*', async (req, res) => {
+    // 301 Redirect old query params to new path structure
+    if (req.query.job) {
+      return res.redirect(301, `/${req.query.job}`);
+    }
+    
+    try {
+      let data = '';
+      if (process.env.NODE_ENV !== 'production') {
+        data = await fs.promises.readFile(path.join(process.cwd(), 'index.html'), 'utf8');
+        data = await vite.transformIndexHtml(req.originalUrl, data);
+      } else {
+        const distPath = path.join(process.cwd(), 'dist');
+        data = await fs.promises.readFile(path.join(distPath, 'index.html'), 'utf8');
       }
-      
-      fs.readFile(path.join(distPath, 'index.html'), 'utf8', async (err, data) => {
-        if (err) {
-          return res.sendFile(path.join(distPath, 'index.html'));
-        }
-        const host = req.get('host')?.includes('localhost') ? `${req.protocol}://${req.get('host')}` : 'https://jobs.talukdaracademy.com.bd';
+
+      const host = req.get('host')?.includes('localhost') ? `${req.protocol}://${req.get('host')}` : 'https://jobs.talukdaracademy.com.bd';
         
         let reqPath = req.path;
         if (reqPath === '/index.html') {
@@ -138,11 +182,13 @@ Sitemap: ${baseUrl}/sitemap.xml`);
         // Handle specific job pages
         const jobMatch = req.path.match(/^\/([^/]+)\/?$/);
         if (jobMatch) {
-          const jobSlugUrl = jobMatch[1];
+          const jobSlugUrl = decodeURIComponent(jobMatch[1]);
+          console.log('Testing jobMatch:', jobSlugUrl);
           try {
             const jobs = await fetchLatestJobs(true);
             const job = jobs.find(j => (j.slug === jobSlugUrl) || (j.id === jobSlugUrl) || (generateSlug(j.title, j.organization) === jobSlugUrl));
             if (job) {
+              console.log('Found job for SEO! imageUrls:', job.imageUrls);
               // ALWAYS set canonical to the standard slug, not necessarily the path requested
               const standardSlug = job.slug || generateSlug(job.title, job.organization);
               canonicalUrl = `${host}/${standardSlug}`;
@@ -173,19 +219,35 @@ Sitemap: ${baseUrl}/sitemap.xml`);
   <meta property="og:image:height" content="630">
   <link rel="canonical" href="${canonicalUrl}">
 `;
+              console.log("Injected OG Image:", job.imageUrls?.[0]);
               updatedHtml = updatedHtml.replace('</head>', `${metaTags}\n  </head>`);
               
               const jsonLd = {
                 "@context": "https://schema.org/",
-                "@type": "JobPosting",
-                "title": cleanedTitle,
+                "@type": "NewsArticle",
+                "headline": cleanedTitle,
                 "description": pageDescription,
-                "datePosted": job.publishedDate,
-                "hiringOrganization": {
+                "datePublished": job.publishedDate,
+                "dateModified": job.publishedDate,
+                "author": {
                   "@type": "Organization",
-                  "name": cleanedOrg
+                  "name": "BD Govt Job Circular"
                 },
-                "url": canonicalUrl
+                "publisher": {
+                  "@type": "Organization",
+                  "name": "BD Govt Job Circular",
+                  "logo": {
+                    "@type": "ImageObject",
+                    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/84/Government_Seal_of_Bangladesh.svg/120px-Government_Seal_of_Bangladesh.svg.png"
+                  }
+                },
+                "image": [
+                  job.imageUrls?.[0] || 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/84/Government_Seal_of_Bangladesh.svg/1200px-Government_Seal_of_Bangladesh.svg.png'
+                ],
+                "mainEntityOfPage": {
+                  "@type": "WebPage",
+                  "@id": canonicalUrl
+                }
               };
               
               const staticContent = `
@@ -193,11 +255,11 @@ Sitemap: ${baseUrl}/sitemap.xml`);
                   ${JSON.stringify(jsonLd)}
                 </script>
                 <noscript>
-                  <article itemscope itemtype="http://schema.org/JobPosting">
-                    <h1 itemprop="title">${cleanedTitle}</h1>
-                    <h2 itemprop="hiringOrganization">${cleanedOrg}</h2>
-                    <p itemprop="datePosted">${job.publishedDate}</p>
-                    <div itemprop="description">${job.content}</div>
+                  <article itemscope itemtype="http://schema.org/NewsArticle">
+                    <h1 itemprop="headline">${cleanedTitle}</h1>
+                    <h2 itemprop="publisher">${cleanedOrg}</h2>
+                    <p itemprop="datePublished">${job.publishedDate}</p>
+                    <div itemprop="articleBody">${job.content}</div>
                   </article>
                 </noscript>
               `;
@@ -215,10 +277,14 @@ Sitemap: ${baseUrl}/sitemap.xml`);
           updatedHtml = updatedHtml.replace('</head>', `  <link rel="canonical" href="${canonicalUrl}">\n  </head>`);
         }
         
-        res.send(updatedHtml);
-      });
-    });
-  }
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(updatedHtml);
+    } catch (e) {
+      if (process.env.NODE_ENV !== 'production' && vite) {
+        vite.ssrFixStacktrace(e);
+      }
+      res.status(500).end(e.message);
+    }
+  });
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running at http://localhost:${PORT}`);
