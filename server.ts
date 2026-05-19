@@ -217,6 +217,10 @@ Sitemap: ${baseUrl}/sitemap.xml`);
   <meta property="og:image" content="${job.imageUrls?.[0] || 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/84/Government_Seal_of_Bangladesh.svg/1200px-Government_Seal_of_Bangladesh.svg.png'}">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="${pageTitle}">
+  <meta name="twitter:description" content="${pageDescription.replace(/"/g, '&quot;')}">
+  <meta name="twitter:image" content="${job.imageUrls?.[0] || 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/84/Government_Seal_of_Bangladesh.svg/1200px-Government_Seal_of_Bangladesh.svg.png'}">
   <link rel="canonical" href="${canonicalUrl}">
 `;
               console.log("Injected OG Image:", job.imageUrls?.[0]);
