@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Download } from 'lucide-react';
 
 export default function InstallPWA() {
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>((window as any).deferredPWAInstallPrompt || null);
   const [isStandalone, setIsStandalone] = useState(false);
 
   useEffect(() => {
@@ -13,9 +13,15 @@ export default function InstallPWA() {
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
       setDeferredPrompt(e);
+      (window as any).deferredPWAInstallPrompt = e;
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    // If it was already captured before the component mounted
+    if ((window as any).deferredPWAInstallPrompt) {
+      setDeferredPrompt((window as any).deferredPWAInstallPrompt);
+    }
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
@@ -23,19 +29,19 @@ export default function InstallPWA() {
   }, []);
 
   const handleInstallClick = async () => {
-    if (window.self !== window.top) {
-      alert("App installation is blocked inside this preview window. Please open the app in a new tab first (using the icon in the top right corner) and try again.");
-      return;
-    }
-
-    if (deferredPrompt) {
-      deferredPrompt.prompt();
-      const { outcome } = await deferredPrompt.userChoice;
-      if (outcome === 'accepted') {
-        setDeferredPrompt(null);
+    const promptEvent = deferredPrompt || (window as any).deferredPWAInstallPrompt;
+    
+    if (promptEvent) {
+      try {
+        await promptEvent.prompt();
+        const { outcome } = await promptEvent.userChoice;
+        if (outcome === 'accepted') {
+          setDeferredPrompt(null);
+          (window as any).deferredPWAInstallPrompt = null;
+        }
+      } catch (err) {
+        console.error("Installation failed:", err);
       }
-    } else {
-      alert("To install the app:\n\n• For Android Chrome: Tap the 3-dot menu and select 'Install app' or 'Add to Home screen'.\n• For iOS Safari: Tap the Share button and select 'Add to Home Screen'.");
     }
   };
 

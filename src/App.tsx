@@ -923,11 +923,42 @@ export default function App() {
       if (metaDescription) {
         metaDescription.setAttribute("content", `${selectedJob.title} circular published by ${selectedJob.organization}. Last date to apply is ${selectedJob.deadline}. Find all govt job circulars at BD Govt Job.`);
       }
+      
+      const ogImage = document.querySelector('meta[property="og:image"]');
+      if (ogImage) {
+        ogImage.setAttribute('content', selectedJob.imageUrls?.[0] || 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/84/Government_Seal_of_Bangladesh.svg/1200px-Government_Seal_of_Bangladesh.svg.png');
+      }
+      
+      const ogTitle = document.querySelector('meta[property="og:title"]');
+      if (ogTitle) {
+        ogTitle.setAttribute('content', `${selectedJob.title} - ${selectedJob.organization}`);
+      }
+      
+      const ogUrl = document.querySelector('meta[property="og:url"]');
+      if (ogUrl) {
+        ogUrl.setAttribute('content', window.location.href);
+      }
+
     } else {
       document.title = 'Jobs.talukdaracademy.com.bd - BD Govt Job Circular 2026 | All Govt Jobs BD';
       const metaDescription = document.querySelector('meta[name="description"]');
       if (metaDescription) {
         metaDescription.setAttribute("content", "All Government Job Circulars in Bangladesh. Find recent govt job circular 2026, new govt recruitment, government job news and more at bd govt job.");
+      }
+      
+      const ogImage = document.querySelector('meta[property="og:image"]');
+      if (ogImage) {
+        ogImage.setAttribute('content', 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/84/Government_Seal_of_Bangladesh.svg/1200px-Government_Seal_of_Bangladesh.svg.png');
+      }
+      
+      const ogTitle = document.querySelector('meta[property="og:title"]');
+      if (ogTitle) {
+        ogTitle.setAttribute('content', 'Jobs.talukdaracademy.com.bd - BD Govt Job Circular 2026 | All Govt Jobs BD');
+      }
+      
+      const ogUrl = document.querySelector('meta[property="og:url"]');
+      if (ogUrl) {
+        ogUrl.setAttribute('content', window.location.origin + '/');
       }
     }
   }, [selectedJob]);

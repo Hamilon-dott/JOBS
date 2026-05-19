@@ -155,6 +155,9 @@ Sitemap: ${baseUrl}/sitemap.xml`);
               const noHtmlContent = job.content.replace(/<[^>]*>?/gm, '');
               pageDescription = noHtmlContent.length > 150 ? noHtmlContent.substring(0, 150) + '...' : noHtmlContent;
               
+              // Remove generic og tags
+              updatedHtml = updatedHtml.replace(/<meta property="og:.*?" content=".*?">\s*/g, '');
+
               // Replace generic title
               updatedHtml = updatedHtml.replace(/<title>.*?<\/title>/i, `<title>${pageTitle}</title>`);
               
@@ -165,7 +168,7 @@ Sitemap: ${baseUrl}/sitemap.xml`);
   <meta property="og:description" content="${pageDescription.replace(/"/g, '&quot;')}">
   <meta property="og:url" content="${canonicalUrl}">
   <meta property="og:type" content="article">
-  <meta property="og:image" content="${job.imageUrls?.[0] || 'https://jobs.talukdaracademy.com.bd/default-job-image.png'}">
+  <meta property="og:image" content="${job.imageUrls?.[0] || 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/84/Government_Seal_of_Bangladesh.svg/1200px-Government_Seal_of_Bangladesh.svg.png'}">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <link rel="canonical" href="${canonicalUrl}">
