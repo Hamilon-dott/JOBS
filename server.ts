@@ -198,7 +198,8 @@ Sitemap: ${baseUrl}/sitemap.xml`);
               pageTitle = `${cleanedTitle} - ${cleanedOrg}`;
               
               // Extract a short description from content
-              const noHtmlContent = job.content.replace(/<[^>]*>?/gm, '');
+              let noHtmlContent = job.content.replace(/<[^>]*>?/gm, '');
+              noHtmlContent = noHtmlContent.replace(/\s+/g, ' ').trim();
               pageDescription = noHtmlContent.length > 150 ? noHtmlContent.substring(0, 150) + '...' : noHtmlContent;
               
               // Remove generic og tags
