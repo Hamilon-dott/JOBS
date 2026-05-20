@@ -186,7 +186,7 @@ const getDaysRemaining = (deadlineStr: string) => {
   }
 };
 
-const BD_GOVT_LOGO = "https://upload.wikimedia.org/wikipedia/commons/thumb/8/84/Government_Seal_of_Bangladesh.svg/120px-Government_Seal_of_Bangladesh.svg.png";
+const BD_GOVT_LOGO = "/img.png";
 
 const InFeedAdComponent = () => {
   const isAdSet = React.useRef(false);

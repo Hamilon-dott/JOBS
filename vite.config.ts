@@ -16,25 +16,25 @@ export default defineConfig(({mode}) => {
           enabled: true
         },
         manifest: {
-          name: 'Jobs BD - All Govt Job Circulars',
-          short_name: 'Jobs BD',
+          name: 'Jobs',
+          short_name: 'Jobs',
           description: 'Bangladesh Govt Job Circular Updates',
           theme_color: '#2563eb',
           background_color: '#ffffff',
           display: 'standalone',
           icons: [
             {
-              src: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/84/Government_Seal_of_Bangladesh.svg/192px-Government_Seal_of_Bangladesh.svg.png',
+              src: '/img.png',
               sizes: '192x192',
               type: 'image/png'
             },
             {
-              src: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/84/Government_Seal_of_Bangladesh.svg/512px-Government_Seal_of_Bangladesh.svg.png',
+              src: '/img.png',
               sizes: '512x512',
               type: 'image/png'
             },
             {
-              src: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/84/Government_Seal_of_Bangladesh.svg/512px-Government_Seal_of_Bangladesh.svg.png',
+              src: '/img.png',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'any maskable'

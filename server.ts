@@ -70,12 +70,13 @@ Sitemap: ${baseUrl}/sitemap.xml`);
         <news:language>bn</news:language>
       </news:publication>
       <news:publication_date>${new Date(job.publishedDate).toISOString()}</news:publication_date>
-      <news:title>${job.title}</news:title>
+      <news:title>${job.title.replace(/[<>&'"]/g, '')}</news:title>
     </news:news>
   </url>`).join('')}
 </urlset>`;
 
       res.type('application/xml');
+      res.set('Cache-Control', 'no-cache, no-store, must-revalidate'); // prevent cloudflare static caching
       res.send(sitemap);
     } catch (error) {
       console.error('Error generating news sitemap:', error);
@@ -106,6 +107,7 @@ Sitemap: ${baseUrl}/sitemap.xml`);
 </urlset>`;
 
       res.type('application/xml');
+      res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
       res.send(sitemap);
     } catch (error) {
       console.error('Error generating sitemap:', error);
@@ -215,13 +217,14 @@ Sitemap: ${baseUrl}/sitemap.xml`);
   <meta property="og:description" content="${pageDescription.replace(/"/g, '&quot;')}">
   <meta property="og:url" content="${canonicalUrl}">
   <meta property="og:type" content="article">
-  <meta property="og:image" content="${job.imageUrls?.[0] || 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/84/Government_Seal_of_Bangladesh.svg/1200px-Government_Seal_of_Bangladesh.svg.png'}">
+  <meta property="og:image" content="${job.imageUrls?.[0] || host + '/img.png'}">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="BD Govt Job Circular">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="${pageTitle}">
   <meta name="twitter:description" content="${pageDescription.replace(/"/g, '&quot;')}">
-  <meta name="twitter:image" content="${job.imageUrls?.[0] || 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/84/Government_Seal_of_Bangladesh.svg/1200px-Government_Seal_of_Bangladesh.svg.png'}">
+  <meta name="twitter:image" content="${job.imageUrls?.[0] || host + '/img.png'}">
   <link rel="canonical" href="${canonicalUrl}">
 `;
               console.log("Injected OG Image:", job.imageUrls?.[0]);

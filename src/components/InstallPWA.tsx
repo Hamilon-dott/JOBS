@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Download } from 'lucide-react';
 
 export default function InstallPWA() {
-  const [deferredPrompt, setDeferredPrompt] = useState<any>((window as any).deferredPWAInstallPrompt || null);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isStandalone, setIsStandalone] = useState(false);
 
   useEffect(() => {
@@ -18,7 +18,6 @@ export default function InstallPWA() {
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
 
-    // If it was already captured before the component mounted
     if ((window as any).deferredPWAInstallPrompt) {
       setDeferredPrompt((window as any).deferredPWAInstallPrompt);
     }
@@ -42,6 +41,14 @@ export default function InstallPWA() {
       } catch (err) {
         console.error("Installation failed:", err);
       }
+    } else {
+      // Fallback message if prompt is not available
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+      if (isIOS) {
+        alert("To install the app, tap the Share icon at the bottom of your browser and select 'Add to Home Screen'.");
+      } else {
+        alert("App can be installed from your browser menu. Look for 'Install app' or 'Add to home screen'.");
+      }
     }
   };
 
@@ -52,10 +59,12 @@ export default function InstallPWA() {
   return (
     <button
       onClick={handleInstallClick}
-      className="md:hidden flex items-center justify-center w-8 h-8 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 shadow-md text-white transition-all transform hover:scale-105 active:scale-95 z-50"
+      className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 rounded-full text-white text-xs font-bold transition-all transform hover:scale-105 active:scale-95 z-50 shadow-md"
       aria-label="Install App"
     >
-      <Download size={16} />
+      <Download size={14} />
+      <span className="hidden sm:inline">Install App</span>
+      <span className="sm:hidden">Install</span>
     </button>
   );
 }
