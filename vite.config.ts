@@ -26,16 +26,18 @@ export default defineConfig(({mode}) => {
             {
               src: '/img.png',
               sizes: '192x192',
-              type: 'image/png'
+              type: 'image/png',
+              purpose: 'any'
             },
             {
               src: '/img.png',
               sizes: '512x512',
-              type: 'image/png'
+              type: 'image/png',
+              purpose: 'any'
             },
             {
               src: '/img.png',
-              sizes: '512x512',
+              sizes: 'any',
               type: 'image/png',
               purpose: 'any maskable'
             }
