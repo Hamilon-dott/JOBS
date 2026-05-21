@@ -167,9 +167,12 @@ Sitemap: ${baseUrl}/sitemap.xml`);
 
       const host = req.get('host')?.includes('localhost') ? `${req.protocol}://${req.get('host')}` : 'https://jobs.talukdaracademy.com.bd';
         
+        // Force canonical to have no trailing slash (except for the root path)
         let reqPath = req.path;
         if (reqPath === '/index.html') {
           reqPath = '/';
+        } else if (reqPath.length > 1 && reqPath.endsWith('/')) {
+          reqPath = reqPath.slice(0, -1);
         }
 
         let canonicalUrl = host + reqPath;
@@ -209,6 +212,9 @@ Sitemap: ${baseUrl}/sitemap.xml`);
 
               // Replace generic title
               updatedHtml = updatedHtml.replace(/<title>.*?<\/title>/i, `<title>${pageTitle}</title>`);
+              
+              // Remove generic description
+              updatedHtml = updatedHtml.replace(/<meta\s+name="description"\s+content="[^"]*"\s*\/?>/gi, '');
               
               // Add meta tags for better indexing
               const metaTags = `
@@ -276,9 +282,15 @@ Sitemap: ${baseUrl}/sitemap.xml`);
               } else {
                 updatedHtml = updatedHtml.replace('<body>', `<body>\n${staticContent}`);
               }
+            } else {
+              // Job not found, revert to fallback home page canonical
+              canonicalUrl = host + '/';
+              updatedHtml = updatedHtml.replace('</head>', `  <link rel="canonical" href="${canonicalUrl}">\n  </head>`);
             }
           } catch (e) {
             console.error('Failed to fetch job for SEO rendering:', e);
+            canonicalUrl = host + '/';
+            updatedHtml = updatedHtml.replace('</head>', `  <link rel="canonical" href="${canonicalUrl}">\n  </head>`);
           }
         } else {
           // Homepage or other pages
