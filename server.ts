@@ -53,7 +53,8 @@ async function startServer() {
     res.type('text/plain');
     res.send(`User-agent: *
 Allow: /
-Sitemap: ${baseUrl}/sitemap.xml`);
+Sitemap: ${baseUrl}/sitemap.xml
+Sitemap: ${baseUrl}/news-sitemap.xml`);
   });
 
   // News Sitemap.xml for Google News
@@ -123,19 +124,24 @@ Sitemap: ${baseUrl}/sitemap.xml`);
     }
   });
 
+  // API Route to fetch a single job
+  app.get('/api/job/:slugOrId', async (req, res) => {
+    try {
+      const job = await fetchSingleJob(req.params.slugOrId);
+      if (job) {
+        return res.json(job);
+      } else {
+        return res.status(404).json({ error: 'Job not found' });
+      }
+    } catch (e: any) {
+      console.error(e.message);
+      res.status(500).json({ error: 'Server error' });
+    }
+  });
+
   // API Route to fetch jobs
   app.get('/api/jobs', async (req, res) => {
     try {
-      const jobId = req.query.id as string;
-      if (jobId) {
-        const job = await fetchSingleJob(jobId);
-        if (job) {
-          return res.json(job);
-        } else {
-          return res.status(404).json({ error: 'Job not found' });
-        }
-      }
-
       const isFull = req.query.full === 'true';
       const jobs = await fetchLatestJobs(isFull);
       res.json(jobs);
@@ -189,9 +195,9 @@ Sitemap: ${baseUrl}/sitemap.xml`);
         data = await fs.promises.readFile(path.join(distPath, 'index.html'), 'utf8');
       }
 
-      const host = req.get('host')?.includes('localhost') ? `${req.protocol}://${req.get('host')}` : 'https://jobs.talukdaracademy.com.bd';
+        const host = req.get('host')?.includes('localhost') ? `${req.protocol}://${req.get('host')}` : 'https://jobs.talukdaracademy.com.bd';
         
-        // Force canonical to have no trailing slash (except for the root path)
+        // ক্যানোনিকাল (Canonical) URL-এর জন্য শেষে থাকা স্লাশ (/) বাদ দিচ্ছি, তবে হোমপেজ হলে থাকবে
         let reqPath = req.path;
         if (reqPath === '/index.html') {
           reqPath = '/';
@@ -206,18 +212,18 @@ Sitemap: ${baseUrl}/sitemap.xml`);
         let pageDescription = "Find the latest Govt and Bank jobs in Bangladesh.";
         let ogImageUrl = host + '/img.png';
         
-        // Always strip the static canonical tag from index.html so we can replace it dynamically
+        // ডিফল্ট canonical ট্যাগটি মুছে দিচ্ছি, যেন ডাইনামিক ট্যাগ যুক্ত করতে পারি
         updatedHtml = updatedHtml.replace(/<link\s+rel="canonical"[^>]*>/gi, '');
-        // Replace generic title everywhere
+        // Title রিপ্রেস করছি
         updatedHtml = updatedHtml.replace(/<title>.*?<\/title>/gi, '');
-        // Remove generic description everywhere to replace it dynamically
+        // Generic description সরিয়ে দিচ্ছি
         updatedHtml = updatedHtml.replace(/<meta\s+name="description"\s+content="[^"]*"\s*\/?>/gi, '');
-        // Remove generic og tags
+        // Generic og tags মুছে দিচ্ছি
         updatedHtml = updatedHtml.replace(/<meta property="og:.*?" content=".*?">\s*/gi, '');
 
         let isJobPage = false;
 
-        // Handle specific job pages
+        // url param বা query parameter অনুযায়ী জবের আসল ডেটা খুঁজে বের করা হচ্ছে
         const jobMatch = req.path.match(/^\/([^/]+)\/?$/);
         if (jobMatch) {
           const jobSlugUrl = decodeURIComponent(jobMatch[1]);
@@ -226,10 +232,12 @@ Sitemap: ${baseUrl}/sitemap.xml`);
             if (job) {
               const standardSlug = job.slug || generateSlug(job.title, job.organization, job.id);
               
+              // যদি URL-এর সাথে আসল canonical স্লাগের মিল না থাকে, তাহলে সঠিক স্লাগে 301 Permanent Redirect করা হচ্ছে
               if (standardSlug !== jobSlugUrl) {
                 return res.redirect(301, `/${standardSlug}`);
               }
               
+              // সঠিক Canonical URL নির্ধারণ করা হচ্ছে
               canonicalUrl = `${host}/${standardSlug}`;
               isJobPage = true;
               
@@ -361,84 +369,65 @@ const httpsAgent = new https.Agent({
   rejectUnauthorized: false
 });
 
-let cachedJobsFull: any[] | null = null;
-let lastFetchFull: number = 0;
-let cachedJobsBrief: any[] | null = null;
-let lastFetchBrief: number = 0;
-const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+// Helper to parse Bengali/English deadline strings
+const parseDeadline = (deadlineStr: string): Date | null => {
+  if (!deadlineStr || deadlineStr.includes('দেখুন') || deadlineStr.includes('চলমান')) return null;
+  
+  // Convert Bengali numerals to English
+  const bengaliToEnglish = (str: string) => {
+    const numerals: { [key: string]: string } = {
+      '০': '0', '১': '1', '২': '2', '৩': '3', '৪': '4', '৫': '5', '৬': '6', '৭': '7', '৮': '8', '৯': '9'
+    };
+    return str.replace(/[০-৯]/g, d => numerals[d]);
+  };
 
-async function fetchLatestJobs(isFull: boolean = false) {
-  const now = Date.now();
-  if (isFull) {
-    if (cachedJobsFull && now - lastFetchFull < CACHE_TTL) {
-      return cachedJobsFull;
-    }
-  } else {
-    if (cachedJobsBrief && now - lastFetchBrief < CACHE_TTL) {
-      return cachedJobsBrief;
+  let cleanStr = bengaliToEnglish(deadlineStr);
+  
+  // Support common separators
+  cleanStr = cleanStr.replace(/[।\/]/g, '-').replace(/\s+/g, ' ').trim();
+
+  // Mapping for Bengali months
+  const months: { [key: string]: string } = {
+    'জানুয়ারি': 'January', 'জানুয়ারী': 'January',
+    'ফেব্রুয়ারি': 'February', 'ফেব্রুয়ারী': 'February',
+    'মার্চ': 'March',
+    'এপ্রিল': 'April',
+    'মে': 'May',
+    'জুন': 'June',
+    'জুলাই': 'July',
+    'আগস্ট': 'August', 'আগষ্ট': 'August',
+    'সেপ্টেম্বর': 'September', 'সেপ্টেম্বার': 'September',
+    'অক্টোবর': 'October', 'অক্টোবার': 'October',
+    'নভেম্বর': 'November', 'নভেম্বার': 'November',
+    'ডিসেম্বর': 'December', 'ডিসেম্বার': 'December'
+  };
+
+  Object.keys(months).forEach(m => {
+    cleanStr = cleanStr.replace(new RegExp(m, 'i'), months[m]);
+  });
+
+  // Handle DD-MM-YYYY or DD-Month-YYYY
+  const parts = cleanStr.split(/[-\s]/);
+  if (parts.length >= 3) {
+    // Try to reformat for JS Date if parts are like [30, May, 2024]
+    const day = parts[0];
+    const month = parts[1];
+    const year = parts[2];
+    
+    // If month is a number (05), ensure it works. 
+    // JavaScript Date handles "2024-05-30" better than "30-05-2024"
+    if (!isNaN(parseInt(day)) && !isNaN(parseInt(month)) && !isNaN(parseInt(year))) {
+      if (year.length === 4) {
+         cleanStr = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+      }
     }
   }
 
-  const jobs: any[] = [];
-  
-  // Helper to parse Bengali/English deadline strings
-  const parseDeadline = (deadlineStr: string): Date | null => {
-    if (!deadlineStr || deadlineStr.includes('দেখুন') || deadlineStr.includes('চলমান')) return null;
-    
-    // Convert Bengali numerals to English
-    const bengaliToEnglish = (str: string) => {
-      const numerals: { [key: string]: string } = {
-        '০': '0', '১': '1', '২': '2', '৩': '3', '৪': '4', '৫': '5', '৬': '6', '৭': '7', '৮': '8', '৯': '9'
-      };
-      return str.replace(/[০-৯]/g, d => numerals[d]);
-    };
+  const date = new Date(cleanStr);
+  return isNaN(date.getTime()) ? null : date;
+};
 
-    let cleanStr = bengaliToEnglish(deadlineStr);
-    
-    // Support common separators
-    cleanStr = cleanStr.replace(/[।\/]/g, '-').replace(/\s+/g, ' ').trim();
-
-    // Mapping for Bengali months
-    const months: { [key: string]: string } = {
-      'জানুয়ারি': 'January', 'জানুয়ারী': 'January',
-      'ফেব্রুয়ারি': 'February', 'ফেব্রুয়ারী': 'February',
-      'মার্চ': 'March',
-      'এপ্রিল': 'April',
-      'মে': 'May',
-      'জুন': 'June',
-      'জুলাই': 'July',
-      'আগস্ট': 'August', 'আগষ্ট': 'August',
-      'সেপ্টেম্বর': 'September', 'সেপ্টেম্বার': 'September',
-      'অক্টোবর': 'October', 'অক্টোবার': 'October',
-      'নভেম্বর': 'November', 'নভেম্বার': 'November',
-      'ডিসেম্বর': 'December', 'ডিসেম্বার': 'December'
-    };
-
-    Object.keys(months).forEach(m => {
-      cleanStr = cleanStr.replace(new RegExp(m, 'i'), months[m]);
-    });
-
-    // Handle DD-MM-YYYY or DD-Month-YYYY
-    const parts = cleanStr.split(/[-\s]/);
-    if (parts.length >= 3) {
-      // Try to reformat for JS Date if parts are like [30, May, 2024]
-      const day = parts[0];
-      const month = parts[1];
-      const year = parts[2];
-      
-      // If month is a number (05), ensure it works. 
-      // JavaScript Date handles "2024-05-30" better than "30-05-2024"
-      if (!isNaN(parseInt(day)) && !isNaN(parseInt(month)) && !isNaN(parseInt(year))) {
-        if (year.length === 4) {
-           cleanStr = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-        }
-      }
-    }
-
-    const date = new Date(cleanStr);
-    return isNaN(date.getTime()) ? null : date;
-  };
-
+// Function to process a WordPress post into a Job object
 function processWpPost(post: any, sourceName: string, thirtyDaysAgo: Date, today: Date, parseDeadline: Function) {
   const title = post.title?.rendered || "Job Circular";
   const titleText = title.replace(/&#8211;/g, '-').replace(/&#8217;/g, "'").replace(/<\/?[^>]+(>|$)/g, "").trim();
@@ -573,6 +562,26 @@ function processWpPost(post: any, sourceName: string, thirtyDaysAgo: Date, today
   }
   return null;
 }
+
+let cachedJobsFull: any[] | null = null;
+let lastFetchFull: number = 0;
+let cachedJobsBrief: any[] | null = null;
+let lastFetchBrief: number = 0;
+const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+
+async function fetchLatestJobs(isFull: boolean = false) {
+  const now = Date.now();
+  if (isFull) {
+    if (cachedJobsFull && now - lastFetchFull < CACHE_TTL) {
+      return cachedJobsFull;
+    }
+  } else {
+    if (cachedJobsBrief && now - lastFetchBrief < CACHE_TTL) {
+      return cachedJobsBrief;
+    }
+  }
+
+  const jobs: any[] = [];
 
 // List of WP-API sources for full content
   const sources = [

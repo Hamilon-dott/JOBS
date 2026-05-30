@@ -7,6 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
 import InstallPWA from './components/InstallPWA';
+import ScrollButtons from './components/ScrollButtons';
 import { 
   Building2, 
   Calendar, 
@@ -475,7 +476,8 @@ export default function App() {
         window.history.pushState({ job: selectedJob.id }, '', url.toString());
       }
 
-      // Add/Update Canonical Link
+      // Add/Update Canonical Link (Client-Side)
+      // Client-side নেভিগেশনের সময় Canonical Tag আপডেট করা হচ্ছে যেন Google সঠিক URL ইনডেক্স করে
       const domain = window.location.hostname.includes('localhost') ? window.location.origin : 'https://jobs.talukdaracademy.com.bd';
       let canonical = document.querySelector('link[rel="canonical"]');
       if (!canonical) {
@@ -593,7 +595,7 @@ export default function App() {
           } else {
              // Not in current list, try fetching directly from API
              try {
-               const response = await axios.get(`/api/jobs?id=${jobId}`);
+               const response = await axios.get(`/api/job/${jobId}`);
                if (response.data && response.data.id && activePage === 'home') {
                  setSelectedJob(response.data);
                }
@@ -2182,6 +2184,7 @@ export default function App() {
           will-change: auto !important;
         }
       `}</style>
+      <ScrollButtons />
     </div>
   );
 }
