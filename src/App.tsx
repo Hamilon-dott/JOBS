@@ -377,7 +377,7 @@ export default function App() {
 
     const handlePopState = (e: PopStateEvent) => {
       const urlParams = new URLSearchParams(window.location.search);
-      const pathMatch = window.location.pathname.match(/^\/([^/]+)\/?$/);
+      const pathMatch = window.location.pathname.match(/^\/jobs\/([^/]+)\/?$/) || window.location.pathname.match(/^\/([^/]+)\/?$/);
       const jobId = pathMatch ? pathMatch[1] : urlParams.get('job');
 
       if (activePageRef.current !== 'home') {
@@ -455,7 +455,7 @@ export default function App() {
   // SEO Helpers
   useEffect(() => {
     if (selectedJob) {
-      const title = `${selectedJob.title} - ${selectedJob.organization} | Jobs.talukdaracademy.com.bd`;
+      const title = `${selectedJob.title} - ${selectedJob.organization}`;
       const description = `Apply for ${selectedJob.title} at ${selectedJob.organization}. Deadline: ${selectedJob.deadline}. Find more details and application instructions for this BD Govt Job Circular 2026.`;
       
       document.title = title;
@@ -464,14 +464,24 @@ export default function App() {
         metaDescription.setAttribute('content', description);
       }
       
+      const ogImage = document.querySelector('meta[property="og:image"]');
+      if (ogImage) {
+        ogImage.setAttribute('content', selectedJob.imageUrls?.[0] || 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/84/Government_Seal_of_Bangladesh.svg/1200px-Government_Seal_of_Bangladesh.svg.png');
+      }
+      
+      const ogTitle = document.querySelector('meta[property="og:title"]');
+      if (ogTitle) {
+        ogTitle.setAttribute('content', title);
+      }
+      
       // Update URL without reloading
       const url = new URL(window.location.href);
-      const pathMatch = url.pathname.match(/^\/([^/]+)\/?$/);
+      const pathMatch = url.pathname.match(/^\/jobs\/([^/]+)\/?$/) || url.pathname.match(/^\/([^/]+)\/?$/);
       const currentId = pathMatch ? pathMatch[1] : url.searchParams.get('job');
       
       const jobSlug = selectedJob.slug || generateSlug(selectedJob.title, selectedJob.organization, selectedJob.id);
-      if (currentId !== jobSlug) {
-        url.pathname = `/${jobSlug}`;
+      if (url.pathname !== `/jobs/${jobSlug}` || url.searchParams.get('job')) {
+        url.pathname = `/jobs/${jobSlug}`;
         url.searchParams.delete('job');
         window.history.pushState({ job: selectedJob.id }, '', url.toString());
       }
@@ -551,7 +561,7 @@ export default function App() {
       }
 
       // Only clear the URL if it actually has a job param/path and we explicitly want to clear it (not just initial state)
-      const pathMatch = url.pathname.match(/^\/([^/]+)\/?$/);
+      const pathMatch = url.pathname.match(/^\/jobs\/([^/]+)\/?$/) || url.pathname.match(/^\/([^/]+)\/?$/);
       const urlJobId = pathMatch ? pathMatch[1] : url.searchParams.get('job');
 
       if (urlJobId) {
@@ -583,7 +593,7 @@ export default function App() {
     // Initial deep link check
     const checkDeepLink = async () => {
       const urlParams = new URLSearchParams(window.location.search);
-      const pathMatch = window.location.pathname.match(/^\/([^/]+)\/?$/);
+      const pathMatch = window.location.pathname.match(/^\/jobs\/([^/]+)\/?$/) || window.location.pathname.match(/^\/([^/]+)\/?$/);
       const jobId = pathMatch ? pathMatch[1] : urlParams.get('job');
       
       if (jobId) {
@@ -983,58 +993,6 @@ export default function App() {
       scrollContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
     }
   }, [currentPage]);
-
-  useEffect(() => {
-    if (selectedJob) {
-      document.title = `${selectedJob.title} - ${selectedJob.organization} | BD Govt Job`;
-      const metaDescription = document.querySelector('meta[name="description"]');
-      if (metaDescription) {
-        metaDescription.setAttribute("content", `${selectedJob.title} circular published by ${selectedJob.organization}. Last date to apply is ${selectedJob.deadline}. Find all govt job circulars at BD Govt Job.`);
-      }
-      
-      const ogImage = document.querySelector('meta[property="og:image"]');
-      if (ogImage) {
-        ogImage.setAttribute('content', selectedJob.imageUrls?.[0] || 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/84/Government_Seal_of_Bangladesh.svg/1200px-Government_Seal_of_Bangladesh.svg.png');
-      }
-      
-      const ogTitle = document.querySelector('meta[property="og:title"]');
-      if (ogTitle) {
-        ogTitle.setAttribute('content', `${selectedJob.title} - ${selectedJob.organization}`);
-      }
-      
-      const ogUrl = document.querySelector('meta[property="og:url"]');
-      if (ogUrl) {
-        ogUrl.setAttribute('content', window.location.href);
-      }
-
-      setTimeout(() => {
-        if ((window as any).FB) {
-          (window as any).FB.XFBML.parse();
-        }
-      }, 500);
-    } else {
-      document.title = 'Jobs.talukdaracademy.com.bd - BD Govt Job Circular 2026 | All Govt Jobs BD';
-      const metaDescription = document.querySelector('meta[name="description"]');
-      if (metaDescription) {
-        metaDescription.setAttribute("content", "All Government Job Circulars in Bangladesh. Find recent govt job circular 2026, new govt recruitment, government job news and more at bd govt job.");
-      }
-      
-      const ogImage = document.querySelector('meta[property="og:image"]');
-      if (ogImage) {
-        ogImage.setAttribute('content', 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/84/Government_Seal_of_Bangladesh.svg/1200px-Government_Seal_of_Bangladesh.svg.png');
-      }
-      
-      const ogTitle = document.querySelector('meta[property="og:title"]');
-      if (ogTitle) {
-        ogTitle.setAttribute('content', 'Jobs.talukdaracademy.com.bd - BD Govt Job Circular 2026 | All Govt Jobs BD');
-      }
-      
-      const ogUrl = document.querySelector('meta[property="og:url"]');
-      if (ogUrl) {
-        ogUrl.setAttribute('content', window.location.origin + '/');
-      }
-    }
-  }, [selectedJob]);
 
   const handleFilterClick = (cat: string) => {
     setActiveFilter(cat);
@@ -1512,7 +1470,7 @@ export default function App() {
                             job.source.includes('Government') ? "border-emerald-200" : "bg-[#f1f5f9] text-[#64748b] border-[#e2e8f0] group-hover:bg-[#3b82f6]/5 group-hover:text-[#3b82f6]"
                           )}>
                             {job.source.includes('Government') ? (
-                              <img src={BD_GOVT_LOGO} alt="Govt Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+                              <img src={BD_GOVT_LOGO} alt="Govt Logo" width={48} height={48} className="w-full h-full object-contain" referrerPolicy="no-referrer" loading="lazy" />
                             ) : (
                               getInitials(job.organization)
                             )}
@@ -1562,7 +1520,7 @@ export default function App() {
                               onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                const shareUrl = `${window.location.origin}/${job.slug || generateSlug(job.title, job.organization, job.id)}`;
+                                const shareUrl = `${window.location.origin}/jobs/${job.slug || generateSlug(job.title, job.organization, job.id)}`;
                                 
                                 const fallbackCopy = () => {
                                   navigator.clipboard.writeText(shareUrl)
@@ -1720,7 +1678,7 @@ export default function App() {
                           onClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            const shareUrl = `${window.location.origin}/${selectedJob.slug || generateSlug(selectedJob.title, selectedJob.organization, selectedJob.id)}`;
+                            const shareUrl = `${window.location.origin}/jobs/${selectedJob.slug || generateSlug(selectedJob.title, selectedJob.organization, selectedJob.id)}`;
                             
                             const fallbackCopy = () => {
                               navigator.clipboard.writeText(shareUrl)
@@ -1802,7 +1760,7 @@ export default function App() {
                         {/* Hidden images to trigger loading */}
                         <div className="hidden">
                           {selectedJob.imageUrls?.map((url, idx) => (
-                            <img key={idx} src={url} onLoad={handleImageLoad} onError={handleImageLoad} referrerPolicy="no-referrer" />
+                            <img key={idx} src={url} alt={`Preload ${idx}`} width={1} height={1} onLoad={handleImageLoad} onError={handleImageLoad} referrerPolicy="no-referrer" loading="lazy" />
                           ))}
                         </div>
                       </motion.div>
@@ -1834,10 +1792,10 @@ export default function App() {
                               </span>
                             ))}
                           </div>
-                          <h2 className="text-2xl md:text-3xl font-bold text-[#0f172a] mb-4 leading-tight">{selectedJob.title}</h2>
+                          <h1 className="text-2xl md:text-3xl font-bold text-[#0f172a] mb-4 leading-tight">{selectedJob.title}</h1>
                           <div className="flex items-center gap-3 bg-slate-50 border border-slate-100 px-4 py-3 rounded-xl inline-flex w-full md:w-auto">
                             {selectedJob.source.includes('Government') && (
-                              <img src={BD_GOVT_LOGO} alt="Govt Logo" className="w-8 h-8 object-contain shrink-0" referrerPolicy="no-referrer" />
+                              <img src={BD_GOVT_LOGO} alt="Govt Logo" width={32} height={32} className="w-8 h-8 object-contain shrink-0" referrerPolicy="no-referrer" loading="lazy" />
                             )}
                             <p className="text-lg text-[#3b82f6] font-semibold">{selectedJob.organization}</p>
                           </div>
@@ -1856,7 +1814,9 @@ export default function App() {
                                     <Zoom>
                                       <img 
                                         src={url} 
-                                        alt={`Circular ${idx + 1}`} 
+                                        alt={`${selectedJob.title} Circular Image ${idx + 1}`} 
+                                        width={800}
+                                        height={1200}
                                         className="w-full h-auto object-contain max-h-[1200px] rounded-lg"
                                         referrerPolicy="no-referrer"
                                         loading="lazy"
@@ -1992,7 +1952,7 @@ export default function App() {
                         {/* Facebook Comments */}
                         <div className="mt-8 bg-white p-4 md:p-6 rounded-xl border border-slate-200 shadow-sm">
                           <h3 className="text-lg font-bold text-slate-800 mb-4 border-b border-slate-100 pb-2">মতামত দিন</h3>
-                          <FacebookComments url={`${window.location.origin}/${selectedJob.slug || generateSlug(selectedJob.title, selectedJob.organization, selectedJob.id)}`} />
+                          <FacebookComments url={`${window.location.origin}/jobs/${selectedJob.slug || generateSlug(selectedJob.title, selectedJob.organization, selectedJob.id)}`} />
                         </div>
                       </motion.div>
                     )}

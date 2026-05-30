@@ -53,6 +53,9 @@ async function startServer() {
     res.type('text/plain');
     res.send(`User-agent: *
 Allow: /
+Allow: /jobs/
+Disallow: /api/
+
 Sitemap: ${baseUrl}/sitemap.xml
 Sitemap: ${baseUrl}/news-sitemap.xml`);
   });
@@ -72,7 +75,7 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
         xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">
   ${recentJobs.map(job => `
   <url>
-    <loc>${host}/${job.slug || generateSlug(job.title, job.organization, job.id)}</loc>
+    <loc>${host}/jobs/${job.slug || generateSlug(job.title, job.organization, job.id)}</loc>
     <news:news>
       <news:publication>
         <news:name>BD Govt Job Circular</news:name>
@@ -108,7 +111,7 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
   </url>
   ${jobs.map(job => `
   <url>
-    <loc>${host}/${job.slug || generateSlug(job.title, job.organization, job.id)}</loc>
+    <loc>${host}/jobs/${job.slug || generateSlug(job.title, job.organization, job.id)}</loc>
     <lastmod>${new Date(job.publishedDate).toISOString().split('T')[0]}</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
@@ -162,7 +165,7 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
     app.use((req, res, next) => {
       // 301 Redirect old query params to new path structure
       if (req.query.job) {
-        return res.redirect(301, `/${req.query.job}`);
+        return res.redirect(301, `/jobs/${req.query.job}`);
       }
       next();
     });
@@ -182,7 +185,7 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
     
     // 301 Redirect old query params to new path structure
     if (req.query.job) {
-      return res.redirect(301, `/${req.query.job}`);
+      return res.redirect(301, `/jobs/${req.query.job}`);
     }
     
     try {
@@ -208,8 +211,8 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
         let canonicalUrl = host + reqPath;
         
         let updatedHtml = data;
-        let pageTitle = "Jobs.talukdaracademy.com.bd - BD Govt Job Circular 2026";
-        let pageDescription = "Find the latest Govt and Bank jobs in Bangladesh.";
+        let pageTitle = "BD Govt Job Circular 2026 - Government and Bank Jobs";
+        let pageDescription = "Find the latest Government and Bank job circulars, notices, and exam results in Bangladesh. Updated daily.";
         let ogImageUrl = host + '/img.png';
         
         // ডিফল্ট canonical ট্যাগটি মুছে দিচ্ছি, যেন ডাইনামিক ট্যাগ যুক্ত করতে পারি
@@ -224,21 +227,29 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
         let isJobPage = false;
 
         // url param বা query parameter অনুযায়ী জবের আসল ডেটা খুঁজে বের করা হচ্ছে
-        const jobMatch = req.path.match(/^\/([^/]+)\/?$/);
-        if (jobMatch) {
-          const jobSlugUrl = decodeURIComponent(jobMatch[1]);
+        const isJobsRoute = req.path.match(/^\/jobs\/([^/]+)\/?$/);
+        const isLegacyRoute = req.path.match(/^\/([^/]+)\/?$/);
+        
+        let jobSlugUrl = '';
+        if (isJobsRoute) {
+          jobSlugUrl = decodeURIComponent(isJobsRoute[1]);
+        } else if (isLegacyRoute && !isLegacyRoute[1].includes('.') && isLegacyRoute[1] !== 'api' && isLegacyRoute[1] !== 'sitemap.xml' && isLegacyRoute[1] !== 'news-sitemap.xml' && isLegacyRoute[1] !== 'robots.txt') {
+          jobSlugUrl = decodeURIComponent(isLegacyRoute[1]);
+        }
+
+        if (jobSlugUrl) {
           try {
             const job = await fetchSingleJob(jobSlugUrl);
             if (job) {
               const standardSlug = job.slug || generateSlug(job.title, job.organization, job.id);
               
-              // যদি URL-এর সাথে আসল canonical স্লাগের মিল না থাকে, তাহলে সঠিক স্লাগে 301 Permanent Redirect করা হচ্ছে
-              if (standardSlug !== jobSlugUrl) {
-                return res.redirect(301, `/${standardSlug}`);
+              // যদি URL-এর সাথে আসল canonical স্লাগের মিল না থাকে বা পুরনো রুট হয়, তাহলে 301 Permanent Redirect করা হচ্ছে
+              if (!isJobsRoute || standardSlug !== jobSlugUrl) {
+                return res.redirect(301, `/jobs/${standardSlug}`);
               }
               
               // সঠিক Canonical URL নির্ধারণ করা হচ্ছে
-              canonicalUrl = `${host}/${standardSlug}`;
+              canonicalUrl = `${host}/jobs/${standardSlug}`;
               isJobPage = true;
               
               const cleanedTitle = job.title.replace(/[<>&'"]/g, '');
