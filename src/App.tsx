@@ -321,8 +321,8 @@ export default function App() {
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [activePage, setActivePage] = useState<'home' | 'privacy' | 'terms' | 'contact'>('home');
   const [jobSummaries, setJobSummaries] = useState<Record<string, { text: string; loading: boolean; error?: string }>>({});
-  const [newJobsRefreshList, setNewJobsRefreshList] = useState<Job[] | null>(null);
   const [isFirstVisit, setIsFirstVisit] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'updated' | 'up-to-date'>('idle');
 
   const aiRef = React.useRef<GoogleGenAI | null>(null);
   const scrollContainerRef = React.useRef<HTMLDivElement>(null);
@@ -461,7 +461,7 @@ export default function App() {
       const currentId = pathMatch ? pathMatch[1] : url.searchParams.get('job');
       
       const jobSlug = selectedJob.slug || generateSlug(selectedJob.title, selectedJob.organization);
-      if (currentId !== selectedJob.id && currentId !== jobSlug) {
+      if (currentId !== jobSlug) {
         url.pathname = `/${jobSlug}`;
         url.searchParams.delete('job');
         window.history.pushState({ job: selectedJob.id }, '', url.toString());
@@ -783,12 +783,32 @@ export default function App() {
       console.warn("Failed to read job cache", e);
     }
 
+    const lastCheckKey = 'last_job_check_timestamp';
+    const now = Date.now();
+    let shouldCheckForUpdates = false;
+
     if (!hasCachedData) {
       setLoading(true);
       setIsFirstVisit(true);
+      shouldCheckForUpdates = true;
+      localStorage.setItem(lastCheckKey, now.toString());
+    } else {
+      const lastCheck = localStorage.getItem(lastCheckKey);
+      const hoursSinceLastCheck = lastCheck ? (now - parseInt(lastCheck, 10)) / (1000 * 60 * 60) : Infinity;
+      
+      if (hoursSinceLastCheck >= 12) {
+        shouldCheckForUpdates = true;
+        setUpdateStatus('checking');
+        localStorage.setItem(lastCheckKey, now.toString());
+      }
     }
     
-    // Background Full Load (Silent to User)
+    if (!shouldCheckForUpdates) {
+      // Skip background check if already checked today
+      return;
+    }
+
+    // Background Full Load
     try {
       const timestamp = Date.now();
       const response = await axios.get(`/api/jobs?full=true&t=${timestamp}`);
@@ -832,22 +852,30 @@ export default function App() {
           const newJobs = data.filter(j => !existingIds.has(String(j.id)) && !knownIdsSet.has(String(j.id)) && !existingTitles.has(j.title.toLowerCase()));
           
           if (newJobs.length > 0 && jobsRef.current.length > 0) {
-             // Only notify if we found completely new jobs
-             setNewJobsRefreshList(data);
+             // Instant show new jobs
+             setJobs(data);
+             setUpdateStatus('updated');
+             setTimeout(() => setUpdateStatus('idle'), 6000);
           } else {
              // If no completely new items, just update items silently
              setJobs(data);
+             setUpdateStatus('up-to-date');
+             setTimeout(() => setUpdateStatus('idle'), 3000);
           }
         } else {
           setJobs(data);
           setLoading(false);
+          setUpdateStatus('idle');
         }
+      } else {
+        if (hasCachedData) setUpdateStatus('idle');
       }
     } catch (error) {
       console.error('Failed to fetch jobs:', error);
       if (!hasCachedData) {
         setJobs(getFallbackJobs());
       }
+      setUpdateStatus('idle');
     } finally {
       setLoading(false);
       setIsFirstVisit(false);
@@ -1402,27 +1430,40 @@ export default function App() {
             </div>
 
             <AnimatePresence>
-              {newJobsRefreshList && (
+              {updateStatus !== 'idle' && (
                 <motion.div
                    initial={{ opacity: 0, y: -20, height: 0 }}
                    animate={{ opacity: 1, y: 0, height: 'auto' }}
                    exit={{ opacity: 0, scale: 0.9, height: 0 }}
-                   className="flex justify-center mb-6 overflow-hidden"
+                   className="flex justify-center mb-6 overflow-hidden sticky top-[80px] z-50"
                 >
-                   <button 
-                     onClick={() => {
-                       setJobs(newJobsRefreshList);
-                       setNewJobsRefreshList(null);
-                       setCurrentPage(1);
-                       if (scrollContainerRef.current) {
-                           scrollContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
-                       }
-                     }}
-                     className="bg-[#3b82f6] text-white px-5 py-2.5 rounded-full shadow-lg shadow-blue-500/30 font-bold text-sm flex items-center gap-2 hover:bg-[#2563eb] transition-all hover:scale-105"
+                   <div 
+                     className={cn(
+                       "px-5 py-2.5 rounded-full shadow-lg font-bold text-sm flex items-center gap-2 transition-all",
+                       updateStatus === 'checking' ? "bg-slate-800 text-white shadow-slate-500/30" :
+                       updateStatus === 'updated' ? "bg-[#10b981] text-white shadow-[#10b981]/30" :
+                       "bg-slate-100 text-slate-700 border border-slate-200"
+                     )}
                    >
-                     <Sparkles size={18} className="animate-pulse" />
-                     নতুন সার্কুলার পাওয়া গেছে! রিলোড করুন
-                   </button>
+                     {updateStatus === 'checking' && (
+                       <>
+                         <Loader2 size={16} className="animate-spin" />
+                         <span>নতুন বিজ্ঞপ্তি খোঁজা হচ্ছে... (Checking for new circulars)</span>
+                       </>
+                     )}
+                     {updateStatus === 'updated' && (
+                       <>
+                         <Sparkles size={18} className="animate-pulse" />
+                         <span>নতুন বিজ্ঞপ্তি পাওয়া গেছে! (New circulars found!)</span>
+                       </>
+                     )}
+                     {updateStatus === 'up-to-date' && (
+                       <>
+                         <Clock size={16} />
+                         <span>সব বিজ্ঞপ্তি আপডেট করা আছে। (Fully updated)</span>
+                       </>
+                     )}
+                   </div>
                 </motion.div>
               )}
             </AnimatePresence>

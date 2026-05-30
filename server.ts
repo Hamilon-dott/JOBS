@@ -150,6 +150,12 @@ Sitemap: ${baseUrl}/sitemap.xml`);
   }
 
   app.get('*', async (req, res) => {
+    // 301 Redirect trailing slashes
+    if (req.path.length > 1 && req.path.endsWith('/')) {
+      const query = req.url.slice(req.path.length);
+      return res.redirect(301, req.path.slice(0, -1) + query);
+    }
+    
     // 301 Redirect old query params to new path structure
     if (req.query.job) {
       return res.redirect(301, `/${req.query.job}`);
@@ -196,6 +202,11 @@ Sitemap: ${baseUrl}/sitemap.xml`);
               console.log('Found job for SEO! imageUrls:', job.imageUrls);
               // ALWAYS set canonical to the standard slug, not necessarily the path requested
               const standardSlug = job.slug || generateSlug(job.title, job.organization);
+              
+              if (standardSlug !== jobSlugUrl) {
+                return res.redirect(301, `/${standardSlug}`);
+              }
+              
               canonicalUrl = `${host}/${standardSlug}`;
               
               const cleanedTitle = job.title.replace(/[<>&'"]/g, '');
