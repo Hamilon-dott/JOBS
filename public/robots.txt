@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+Sitemap: https://jobs.talukdaracademy.com.bd/sitemap.xml
+Sitemap: https://jobs.talukdaracademy.com.bd/news-sitemap.xml

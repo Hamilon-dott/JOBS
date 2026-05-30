@@ -46,7 +46,7 @@ function cn(...inputs: ClassValue[]) {
 }
 
 // Slug generation function
-function generateSlug(title: string, orgName?: string | null, fallbackId?: string): string {
+function generateSlug(title: string, orgName?: string | null, fallbackId?: string, wpSlug?: string | null): string {
   const extractEnglish = (text?: string | null) => {
     if (!text) return '';
     return text
@@ -58,17 +58,25 @@ function generateSlug(title: string, orgName?: string | null, fallbackId?: strin
       .replace(/^-+|-+$/g, ''); // Remove leading/trailing hyphens
   };
 
-  let slug = extractEnglish(title);
-  if (!slug || slug.length < 3) {
-    if (orgName) {
-      const orgSlug = extractEnglish(orgName);
-      if (orgSlug && orgSlug.length >= 2) {
-        slug = `${orgSlug}-job-circular`;
+  let slug = wpSlug ? String(wpSlug).trim() : '';
+
+  if (!slug || /^\d+$/.test(slug)) {
+    slug = extractEnglish(title);
+    if (!slug || slug.length < 3 || /^\d+$/.test(slug)) {
+      if (orgName) {
+        const orgSlug = extractEnglish(orgName);
+        if (orgSlug && orgSlug.length >= 2 && !/^\d+$/.test(orgSlug)) {
+          slug = `${orgSlug}-job-circular`;
+        }
       }
     }
   }
 
-  return slug || fallbackId || '';
+  if (!slug || /^\d+$/.test(slug)) {
+    slug = fallbackId ? `job-circular-${fallbackId}` : `job-circular-${Date.now()}`;
+  }
+
+  return slug;
 }
 
 interface Job {
@@ -376,7 +384,7 @@ export default function App() {
       } else if (selectedJobRef.current && !jobId) {
         setSelectedJob(null);
       } else if (jobId && jobsRef.current.length > 0) {
-        const job = jobsRef.current.find(j => j.id === jobId || j.slug === jobId || generateSlug(j.title, j.organization) === jobId);
+        const job = jobsRef.current.find(j => j.id === jobId || j.slug === jobId || generateSlug(j.title, j.organization, j.id) === jobId);
         if (job) setSelectedJob(job);
       } else if (!showExitConfirmRef.current && !selectedJobRef.current) {
         // Only show exit confirm if we're at the root and moving back
@@ -460,7 +468,7 @@ export default function App() {
       const pathMatch = url.pathname.match(/^\/([^/]+)\/?$/);
       const currentId = pathMatch ? pathMatch[1] : url.searchParams.get('job');
       
-      const jobSlug = selectedJob.slug || generateSlug(selectedJob.title, selectedJob.organization);
+      const jobSlug = selectedJob.slug || generateSlug(selectedJob.title, selectedJob.organization, selectedJob.id);
       if (currentId !== jobSlug) {
         url.pathname = `/${jobSlug}`;
         url.searchParams.delete('job');
@@ -546,7 +554,7 @@ export default function App() {
 
       if (urlJobId) {
         if (jobs.length > 0) {
-           const jobExistsInList = jobs.some(j => j.id === urlJobId || j.slug === urlJobId || generateSlug(j.title, j.organization) === urlJobId);
+           const jobExistsInList = jobs.some(j => j.id === urlJobId || j.slug === urlJobId || generateSlug(j.title, j.organization, j.id) === urlJobId);
            const isExactlyOnHomeWithoutJob = activePage === 'home' && !selectedJob;
            
            // Only clear if it's not in the list AND we've potentially already tried direct fetching
@@ -579,7 +587,7 @@ export default function App() {
       if (jobId) {
         // If we have jobs loaded, check if it's there
         if (jobs.length > 0) {
-          const job = jobs.find(j => j.id === jobId || j.slug === jobId || generateSlug(j.title, j.organization) === jobId);
+          const job = jobs.find(j => j.id === jobId || j.slug === jobId || generateSlug(j.title, j.organization, j.id) === jobId);
           if (job) {
              if (activePage === 'home') setSelectedJob(job);
           } else {
@@ -1484,7 +1492,7 @@ export default function App() {
                   paginatedJobs.flatMap((job, idx) => {
                     const elements = [
                       <motion.a
-                        href={`/${job.slug || generateSlug(job.title, job.organization)}`}
+                        href={`/${job.slug || generateSlug(job.title, job.organization, job.id)}`}
                         layout
                         initial={{ opacity: 0, x: -10 }}
                         animate={{ opacity: 1, x: 0 }}
@@ -1552,7 +1560,7 @@ export default function App() {
                               onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                const shareUrl = `${window.location.origin}/${job.slug || generateSlug(job.title, job.organization)}`;
+                                const shareUrl = `${window.location.origin}/${job.slug || generateSlug(job.title, job.organization, job.id)}`;
                                 
                                 const fallbackCopy = () => {
                                   navigator.clipboard.writeText(shareUrl)
@@ -1710,7 +1718,7 @@ export default function App() {
                           onClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            const shareUrl = `${window.location.origin}/${selectedJob.slug || generateSlug(selectedJob.title, selectedJob.organization)}`;
+                            const shareUrl = `${window.location.origin}/${selectedJob.slug || generateSlug(selectedJob.title, selectedJob.organization, selectedJob.id)}`;
                             
                             const fallbackCopy = () => {
                               navigator.clipboard.writeText(shareUrl)
@@ -1982,7 +1990,7 @@ export default function App() {
                         {/* Facebook Comments */}
                         <div className="mt-8 bg-white p-4 md:p-6 rounded-xl border border-slate-200 shadow-sm">
                           <h3 className="text-lg font-bold text-slate-800 mb-4 border-b border-slate-100 pb-2">মতামত দিন</h3>
-                          <FacebookComments url={`${window.location.origin}/${selectedJob.slug || generateSlug(selectedJob.title, selectedJob.organization)}`} />
+                          <FacebookComments url={`${window.location.origin}/${selectedJob.slug || generateSlug(selectedJob.title, selectedJob.organization, selectedJob.id)}`} />
                         </div>
                       </motion.div>
                     )}
