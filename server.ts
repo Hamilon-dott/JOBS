@@ -10,9 +10,41 @@ import fs from 'fs';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, getDocs, doc, setDoc, query, orderBy, limit, getDoc, deleteDoc } from 'firebase/firestore';
 
-const firebaseConfig = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf-8'));
+let firebaseConfig: any;
+let firestoreDatabaseId: string | undefined;
+
+if (process.env.FIREBASE_API_KEY) {
+  firebaseConfig = {
+    apiKey: process.env.FIREBASE_API_KEY,
+    authDomain: process.env.FIREBASE_AUTH_DOMAIN,
+    projectId: process.env.FIREBASE_PROJECT_ID,
+    storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
+    appId: process.env.FIREBASE_APP_ID,
+    measurementId: process.env.FIREBASE_MEASUREMENT_ID || ""
+  };
+  firestoreDatabaseId = process.env.FIREBASE_FIRESTORE_DATABASE_ID;
+} else {
+  const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+  if (fs.existsSync(configPath)) {
+    const configData = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    firebaseConfig = configData;
+    firestoreDatabaseId = configData.firestoreDatabaseId;
+  } else {
+    // Fallback/No-op placeholder config if nothing is found (prevents crash on build/lint)
+    firebaseConfig = {
+      apiKey: "MOCK_KEY",
+      authDomain: "mock.firebaseapp.com",
+      projectId: "mock-project",
+      storageBucket: "mock.appspot.com",
+      messagingSenderId: "123456789",
+      appId: "1:123:web:123"
+    };
+  }
+}
+
 const firebaseApp = initializeApp(firebaseConfig);
-const db = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
+const db = getFirestore(firebaseApp, firestoreDatabaseId);
 
 // Slug generation function
 function generateSlug(title: string, orgName?: string | null, fallbackId?: string, wpSlug?: string | null): string {
@@ -238,6 +270,14 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
         let updatedHtml = data;
         let pageTitle = "BD Govt Job Circular 2026 - Government and Bank Jobs";
         let pageDescription = "Find the latest Government and Bank job circulars, notices, and exam results in Bangladesh. Updated daily.";
+        
+        const searchQuery = req.query.search || req.query.q || '';
+        if (searchQuery) {
+          const cleanQuery = String(searchQuery).replace(/[<>&'"]/g, '');
+          pageTitle = `${cleanQuery} - BD Govt Job Circular 2026 | All Govt Jobs BD`;
+          pageDescription = `Get all recent results and recruitment notices matching "${cleanQuery}" in the Bangladesh Government and Bank Job Circular 2026. Find eligibility and apply now.`;
+        }
+        
         let ogImageUrl = host + '/img.png';
         
         // ডিফল্ট canonical ট্যাগটি মুছে দিচ্ছি, যেন ডাইনামিক ট্যাগ যুক্ত করতে পারি
@@ -365,6 +405,30 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
         } else {
           // Homepage or other pages
           canonicalUrl = host + '/';
+          
+          const websiteSchema = {
+            "@context": "https://schema.org",
+            "@type": "WebSite",
+            "name": "BD Govt Job Circular 2026",
+            "alternateName": "Talukdar Academy Jobs",
+            "url": host,
+            "potentialAction": {
+              "@type": "SearchAction",
+              "target": `${host}/?search={search_term_string}`,
+              "query-input": "required name=search_term_string"
+            }
+          };
+          
+          const staticContent = `
+            <script type="application/ld+json">
+              ${JSON.stringify(websiteSchema)}
+            </script>
+          `;
+          if (updatedHtml.includes('<div id="root"></div>')) {
+            updatedHtml = updatedHtml.replace('<div id="root"></div>', `${staticContent}\n<div id="root"></div>`);
+          } else {
+            updatedHtml = updatedHtml.replace('<body>', `<body>\n${staticContent}`);
+          }
         }
         
         // Add meta tags for better indexing

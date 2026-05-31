@@ -576,6 +576,27 @@ export default function App() {
     } else {
       document.title = "Jobs.talukdaracademy.com.bd - BD Govt Job Circular 2026 | All Govt Jobs BD";
       
+      const homeDescription = "All Government Job Circulars in Bangladesh. Find recent govt job circular 2026, new govt recruitment, government job news and more at bd govt job.";
+      const metaDescription = document.querySelector('meta[name="description"]');
+      if (metaDescription) {
+        metaDescription.setAttribute('content', homeDescription);
+      }
+      
+      const ogTitle = document.querySelector('meta[property="og:title"]');
+      if (ogTitle) {
+        ogTitle.setAttribute('content', "Jobs.talukdaracademy.com.bd - BD Govt Job Circular 2026 | All Govt Jobs BD");
+      }
+      
+      const ogDescription = document.querySelector('meta[property="og:description"]');
+      if (ogDescription) {
+        ogDescription.setAttribute('content', homeDescription);
+      }
+      
+      const ogImage = document.querySelector('meta[property="og:image"]');
+      if (ogImage) {
+        ogImage.setAttribute('content', 'https://jobs.talukdaracademy.com.bd/img.png');
+      }
+
       const url = new URL(window.location.href);
       
       // Reset Canonical Link to Home

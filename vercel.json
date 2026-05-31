@@ -1,6 +1,16 @@
 {
   "version": 2,
+  "crons": [
+    {
+      "path": "/api/sync-firebase",
+      "schedule": "0 */6 * * *"
+    }
+  ],
   "rewrites": [
+    {
+      "source": "/api/sync-firebase",
+      "destination": "/api/sync-firebase.ts"
+    },
     {
       "source": "/api/jobs",
       "destination": "/api/jobs.ts"
