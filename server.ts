@@ -8,7 +8,7 @@ import fs from 'fs';
 
 // Initialize Firebase
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, getDocs, doc, setDoc, query, orderBy, limit, getDoc, deleteDoc } from 'firebase/firestore';
+import { getFirestore, collection, getDocs, doc, setDoc, query, orderBy, limit, getDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 
 let firebaseConfig: any;
 let firestoreDatabaseId: string | undefined;
@@ -197,7 +197,8 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
   // API Route to manually sync jobs to Firebase
   app.get('/api/sync-firebase', async (req, res) => {
     try {
-      const result = await syncJobsToFirebase();
+      const isQuick = req.query.quick === 'true' || req.query.q === '1';
+      const result = await syncJobsToFirebase(isQuick);
       res.json(result);
     } catch (error) {
       console.error('Error syncing:', error);
@@ -948,27 +949,38 @@ async function cleanupExpiredJobsFromFirebase() {
 }
 
 let isSyncing = false;
-async function syncJobsToFirebase() {
+async function syncJobsToFirebase(isQuick: boolean = false) {
   if (isSyncing) return { message: "Already syncing" };
   isSyncing = true;
-  console.log("Starting background sync to Firebase...");
+  console.log(`Starting background sync to Firebase (isQuick: ${isQuick})...`);
   try {
     // First run the 3-month expiration cleanup
     await cleanupExpiredJobsFromFirebase();
 
-    const jobs = await fetchJobsFromWP(true); // get full jobs
-    let count = 0;
-    for (const job of jobs) {
-      if (count >= 500) break; // Store up to 500 to guarantee "at least 350"
-      const jobRef = doc(db, 'jobs', job.id);
-      await setDoc(jobRef, {
-        ...job,
-        _syncToken: "BdGovtJobAdminSyncX123"
-      });
-      count++;
+    const isWPFull = !isQuick;
+    const jobs = await fetchJobsFromWP(isWPFull); // get full or brief jobs
+    let syncedCount = 0;
+    
+    // Write in batch chunk sizes of 200 (Firestore max batch size is 500)
+    const chunkSize = 200;
+    for (let i = 0; i < jobs.length; i += chunkSize) {
+      const chunk = jobs.slice(i, i + chunkSize);
+      const batch = writeBatch(db);
+      
+      for (const job of chunk) {
+        const jobRef = doc(db, 'jobs', job.id);
+        batch.set(jobRef, {
+          ...job,
+          _syncToken: "BdGovtJobAdminSyncX123"
+        });
+      }
+      
+      await batch.commit();
+      syncedCount += chunk.length;
     }
-    console.log(`Synced ${count} jobs to Firebase successfully.`);
-    return { success: true, count };
+    
+    console.log(`Synced ${syncedCount} jobs to Firebase successfully using writeBatch.`);
+    return { success: true, count: syncedCount };
   } catch (error) {
     console.error("Error syncing to Firebase:", error);
     return { success: false, error: (error as Error).message };

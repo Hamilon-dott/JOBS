@@ -794,7 +794,7 @@ export default function App() {
     setIsSyncingFirebase(true);
     setSyncMessage({ text: '', type: 'idle' });
     try {
-      const response = await axios.get('/api/sync-firebase');
+      const response = await axios.get('/api/sync-firebase?quick=true');
       if (response.data && response.data.success) {
         setSyncMessage({ text: 'সফলভাবে নতুন বিজ্ঞপ্তি আপডেট হয়েছে!', type: 'success' });
         // Force-refetch jobs list from Firebase

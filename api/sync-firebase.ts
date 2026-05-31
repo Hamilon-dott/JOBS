@@ -1,9 +1,11 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, getDocs, doc, setDoc, query, orderBy, limit, deleteDoc } from 'firebase/firestore';
+import { getFirestore, collection, getDocs, doc, setDoc, query, orderBy, limit, deleteDoc, writeBatch } from 'firebase/firestore';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import https from 'https';
+import fs from 'fs';
+import path from 'path';
 
 const httpsAgent = new https.Agent({  
   rejectUnauthorized: false
@@ -16,22 +18,33 @@ let db: any;
 const initializeFirebaseInVercel = () => {
   if (db) return db;
   
-  const firebaseConfig = {
-    apiKey: process.env.FIREBASE_API_KEY,
-    authDomain: process.env.FIREBASE_AUTH_DOMAIN,
-    projectId: process.env.FIREBASE_PROJECT_ID,
-    storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
-    appId: process.env.FIREBASE_APP_ID,
-    measurementId: process.env.FIREBASE_MEASUREMENT_ID || ""
-  };
+  let firebaseConfig: any;
+  let firestoreDatabaseId: string | undefined;
 
-  if (!firebaseConfig.apiKey) {
-    throw new Error("Missing FIREBASE_API_KEY environment variable. Cannot sync to Firebase.");
+  if (process.env.FIREBASE_API_KEY) {
+    firebaseConfig = {
+      apiKey: process.env.FIREBASE_API_KEY,
+      authDomain: process.env.FIREBASE_AUTH_DOMAIN,
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+      messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
+      appId: process.env.FIREBASE_APP_ID,
+      measurementId: process.env.FIREBASE_MEASUREMENT_ID || ""
+    };
+    firestoreDatabaseId = process.env.FIREBASE_FIRESTORE_DATABASE_ID;
+  } else {
+    const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+    if (fs.existsSync(configPath)) {
+      const configData = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      firebaseConfig = configData;
+      firestoreDatabaseId = configData.firestoreDatabaseId;
+    } else {
+      throw new Error("Firebase configuration not found. Please set FIREBASE_API_KEY env variables or ensure firebase-applet-config.json exists.");
+    }
   }
 
   firebaseApp = initializeApp(firebaseConfig);
-  db = getFirestore(firebaseApp, process.env.FIREBASE_FIRESTORE_DATABASE_ID);
+  db = getFirestore(firebaseApp, firestoreDatabaseId);
   return db;
 };
 
@@ -175,7 +188,7 @@ const parseBengaliDate = (dateStr: string): Date | null => {
 };
 
 // Fetch Word Press content & parse
-async function fetchJobsFromWP(): Promise<any[]> {
+async function fetchJobsFromWP(isQuick: boolean = false): Promise<any[]> {
   const jobs: any[] = [];
   const sources = [
     { name: 'BD Govt Job', baseUrl: 'https://bdgovtjob.net/wp-json/wp/v2/posts?_embed' }
@@ -186,8 +199,8 @@ async function fetchJobsFromWP(): Promise<any[]> {
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(today.getDate() - 30);
   
-  const targetCount = 500; // Store up to 500 active jobs per guidelines
-  const maxSearchPages = 10;
+  const targetCount = isQuick ? 80 : 500; // Store up to 500 active jobs per guidelines
+  const maxSearchPages = isQuick ? 2 : 10;
 
   for (const source of sources) {
     try {
@@ -394,29 +407,40 @@ async function cleanupExpired(firestoreDb: any) {
 // Serverless Handler Entrypoint
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
+    const isQuick = req.query.quick === 'true' || req.query.q === '1';
+    
     // 1. Authorize trigger (Can be open or optionally protected)
     const firestoreDb = initializeFirebaseInVercel();
     
     console.log("Vercel Cron: Running cleanups standard...");
     const cleanedCount = await cleanupExpired(firestoreDb);
 
-    console.log("Vercel Cron: Running direct WP parser sync to Firebase Firestore...");
-    const jobs = await fetchJobsFromWP();
+    console.log(`Vercel Cron: Running direct WP parser sync to Firebase Firestore (isQuick: ${isQuick})...`);
+    const jobs = await fetchJobsFromWP(isQuick);
     
     let syncedCount = 0;
-    for (const job of jobs) {
-      if (syncedCount >= 500) break;
-      const jobRef = doc(firestoreDb, 'jobs', job.id);
-      await setDoc(jobRef, {
-        ...job,
-        _syncToken: "BdGovtJobAdminSyncX123"
-      });
-      syncedCount++;
+    
+    // Write in batch chunk sizes of 200 (Firestore max batch size is 500)
+    const chunkSize = 200;
+    for (let i = 0; i < jobs.length; i += chunkSize) {
+      const chunk = jobs.slice(i, i + chunkSize);
+      const batch = writeBatch(firestoreDb);
+      
+      for (const job of chunk) {
+        const jobRef = doc(firestoreDb, 'jobs', job.id);
+        batch.set(jobRef, {
+          ...job,
+          _syncToken: "BdGovtJobAdminSyncX123"
+        });
+      }
+      
+      await batch.commit();
+      syncedCount += chunk.length;
     }
 
     return res.status(200).json({
       success: true,
-      message: "Sync complete successfully on Vercel.",
+      message: `Sync complete successfully on Vercel. Synced ${syncedCount} jobs.`,
       stats: {
         cleanedCount,
         syncedCount,
