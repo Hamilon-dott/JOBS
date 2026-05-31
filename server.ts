@@ -6,6 +6,14 @@ import * as cheerio from 'cheerio';
 import https from 'https';
 import fs from 'fs';
 
+// Initialize Firebase
+import { initializeApp } from 'firebase/app';
+import { getFirestore, collection, getDocs, doc, setDoc, query, orderBy, limit, getDoc } from 'firebase/firestore';
+
+const firebaseConfig = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf-8'));
+const firebaseApp = initializeApp(firebaseConfig);
+const db = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
+
 // Slug generation function
 function generateSlug(title: string, orgName?: string | null, fallbackId?: string, wpSlug?: string | null): string {
   const extractEnglish = (text?: string | null) => {
@@ -153,6 +161,23 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
       res.status(500).json({ error: 'Failed to fetch jobs' });
     }
   });
+
+  // API Route to manually sync jobs to Firebase
+  app.get('/api/sync-firebase', async (req, res) => {
+    try {
+      const result = await syncJobsToFirebase();
+      res.json(result);
+    } catch (error) {
+      console.error('Error syncing:', error);
+      res.status(500).json({ error: 'Failed to sync to Firebase' });
+    }
+  });
+
+  // Schedule background sync every 6 hours
+  setInterval(() => {
+    console.log("Running scheduled 6-hour sync to Firebase...");
+    syncJobsToFirebase();
+  }, 6 * 60 * 60 * 1000);
 
   // Vite integration
   let vite;
@@ -580,7 +605,7 @@ let cachedJobsBrief: any[] | null = null;
 let lastFetchBrief: number = 0;
 const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 
-async function fetchLatestJobs(isFull: boolean = false) {
+async function fetchJobsFromWP(isFull: boolean = false) {
   const now = Date.now();
   if (isFull) {
     if (cachedJobsFull && now - lastFetchFull < CACHE_TTL) {
@@ -721,7 +746,76 @@ async function fetchLatestJobs(isFull: boolean = false) {
   return fallbackResult;
 }
 
+let isSyncing = false;
+async function syncJobsToFirebase() {
+  if (isSyncing) return { message: "Already syncing" };
+  isSyncing = true;
+  console.log("Starting background sync to Firebase...");
+  try {
+    const jobs = await fetchJobsFromWP(true); // get full jobs
+    let count = 0;
+    for (const job of jobs) {
+      if (count > 200) break; // Don't overwhelm Firebase initially
+      const jobRef = doc(db, 'jobs', job.id);
+      await setDoc(jobRef, {
+        ...job,
+        _syncToken: "BdGovtJobAdminSyncX123"
+      });
+      count++;
+    }
+    console.log(`Synced ${count} jobs to Firebase successfully.`);
+    return { success: true, count };
+  } catch (error) {
+    console.error("Error syncing to Firebase:", error);
+    return { success: false, error: (error as Error).message };
+  } finally {
+    isSyncing = false;
+  }
+}
+
+async function fetchLatestJobs(isFull: boolean = false) {
+  try {
+    const jobsRef = collection(db, 'jobs');
+    const limitCount = isFull ? 300 : 40;
+    const q = query(jobsRef, orderBy('publishedDate', 'desc'), limit(limitCount));
+    const snapshot = await getDocs(q);
+    
+    if (snapshot.empty) {
+      console.log("Firebase is empty, triggering sync in background...");
+      syncJobsToFirebase();
+      return fetchJobsFromWP(isFull);
+    }
+    
+    const jobs = snapshot.docs.map(doc => {
+      const data = doc.data();
+      delete data._syncToken;
+      return data;
+    });
+    return jobs;
+  } catch (e: any) {
+    console.error("Firebase read error in fetchLatestJobs:", e.message);
+    return fetchJobsFromWP(isFull);
+  }
+}
+
 async function fetchSingleJob(slugOrId: string) {
+  try {
+    const jobsRef = collection(db, 'jobs');
+    const q1 = query(jobsRef, orderBy('publishedDate', 'desc'), limit(300));
+    const snapshot = await getDocs(q1);
+    
+    // Manual find because we don't have custom indexes for slug on Firebase right now
+    for (const doc of snapshot.docs) {
+      const data = doc.data();
+      if (data.id === slugOrId || data.slug === slugOrId) {
+        delete data._syncToken;
+        return data;
+      }
+    }
+  } catch (e: any) {
+    console.error("Firebase read error in fetchSingleJob:", e.message);
+  }
+
   // Check cache first
   if (cachedJobsFull) {
     const job = cachedJobsFull.find(j => j.id === slugOrId || j.slug === slugOrId);

@@ -1757,10 +1757,10 @@ export default function App() {
                           </div>
                         )}
                         
-                        {/* Hidden images to trigger loading */}
-                        <div className="hidden">
+                        {/* Off-screen images to trigger loading */}
+                        <div style={{ position: 'absolute', width: 0, height: 0, overflow: 'hidden', opacity: 0 }}>
                           {selectedJob.imageUrls?.map((url, idx) => (
-                            <img key={idx} src={url} alt={`Preload ${idx}`} width={1} height={1} onLoad={handleImageLoad} onError={handleImageLoad} referrerPolicy="no-referrer" loading="lazy" />
+                            <img key={idx} src={url} alt={`Preload ${idx}`} onLoad={handleImageLoad} onError={handleImageLoad} referrerPolicy="no-referrer" />
                           ))}
                         </div>
                       </motion.div>
