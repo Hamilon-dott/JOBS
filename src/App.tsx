@@ -359,6 +359,17 @@ export default function App() {
   const [isSyncingFirebase, setIsSyncingFirebase] = useState(false);
   const [syncMessage, setSyncMessage] = useState<{ text: string; type: 'success' | 'error' | 'idle' }>({ text: '', type: 'idle' });
 
+  // Google Indexing Console States
+  const [showIndexingConsole, setShowIndexingConsole] = useState(false);
+  const [indexingStatusResponse, setIndexingStatusResponse] = useState<any>(null);
+  const [isCheckingIndexing, setIsCheckingIndexing] = useState(false);
+  const [manualIndexingUrl, setManualIndexingUrl] = useState('');
+  const [manualIndexingLoading, setManualIndexingLoading] = useState(false);
+  const [manualIndexingResult, setManualIndexingResult] = useState<any>(null);
+  const [manualIndexingError, setManualIndexingError] = useState<string | null>(null);
+  const [googleIndexingLoading, setGoogleIndexingLoading] = useState(false);
+  const [googleIndexingResponse, setGoogleIndexingResponse] = useState<any>(null);
+
   const aiRef = React.useRef<GoogleGenAI | null>(null);
   const scrollContainerRef = React.useRef<HTMLDivElement>(null);
 
@@ -781,10 +792,10 @@ export default function App() {
   useEffect(() => {
     fetchJobs();
     
-    // Check for new jobs every 15 minutes in the background
+    // Check for new jobs every 6 hours in the background
     const intervalId = setInterval(() => {
       fetchJobs();
-    }, 15 * 60 * 1000);
+    }, 6 * 60 * 60 * 1000);
 
     return () => clearInterval(intervalId);
   }, []);
@@ -810,6 +821,67 @@ export default function App() {
       setTimeout(() => {
         setSyncMessage({ text: '', type: 'idle' });
       }, 5000);
+    }
+  };
+
+  const checkIndexingStatus = async () => {
+    setIsCheckingIndexing(true);
+    setIndexingStatusResponse(null);
+    try {
+      const response = await axios.post('/api/index-jobs', { action: 'status' });
+      setIndexingStatusResponse(response.data);
+    } catch (err: any) {
+      setIndexingStatusResponse({
+        success: false,
+        error: err.response?.data?.error || err.message || "সার্ভারের সাথে যোগাযোগ করতে ব্যর্থ"
+      });
+    } finally {
+      setIsCheckingIndexing(false);
+    }
+  };
+
+  const handleManualUrlIndex = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualIndexingUrl) return;
+    setManualIndexingLoading(true);
+    setManualIndexingResult(null);
+    setManualIndexingError(null);
+    try {
+      const response = await axios.post('/api/index-jobs', {
+        action: 'index_url',
+        manualUrl: manualIndexingUrl
+      });
+      if (response.data?.success) {
+        setManualIndexingResult(response.data);
+      } else {
+        setManualIndexingError(response.data?.message || "ইনডেক্সিং রিকোয়েস্ট ব্যর্থ হয়েছে।");
+      }
+    } catch (err: any) {
+      setManualIndexingError(
+        err.response?.data?.message || 
+        err.response?.data?.error || 
+        err.message || 
+        "ইনডেক্সিং রিকোয়েস্টে ত্রুটি হয়েছে।"
+      );
+    } finally {
+      setManualIndexingLoading(false);
+    }
+  };
+
+  const runBulkAutoIndexing = async () => {
+    setGoogleIndexingLoading(true);
+    setGoogleIndexingResponse(null);
+    try {
+      const response = await axios.post('/api/index-jobs', { action: 'bulk' });
+      setGoogleIndexingResponse(response.data);
+      await checkIndexingStatus();
+    } catch (err: any) {
+      setGoogleIndexingResponse({
+        success: false,
+        message: err.response?.data?.error || err.message || "বাল্ক ইনডেক্সিং রিকোয়েস্ট ব্যর্থ হয়েছে।"
+      });
+    } finally {
+      setGoogleIndexingLoading(false);
     }
   };
 
@@ -854,62 +926,45 @@ export default function App() {
 
   const fetchJobs = async (force: boolean = false) => {
     const CACHE_KEY = 'job_db_cache';
-
     let hasCachedData = false;
+    let cachedJobs: Job[] = [];
 
-    // Priority Cache Load
+    // Priority Cache Load - Instantly show cached data with no delay!
     try {
       const cached = localStorage.getItem(CACHE_KEY);
       if (cached) {
-        const { lastSyncTime, jobs: cachedJobs } = JSON.parse(cached);
-        if (Array.isArray(cachedJobs) && cachedJobs.length > 0) {
+        const parsed = JSON.parse(cached);
+        const parsedJobs = parsed?.jobs;
+        if (Array.isArray(parsedJobs) && parsedJobs.length > 0) {
           console.log("Showing cached jobs immediately...");
-          setJobs(cachedJobs);
+          setJobs(parsedJobs);
           setCurrentPage(1);
           setLoading(false);
           hasCachedData = true;
+          cachedJobs = parsedJobs;
         }
       }
     } catch (e) {
       console.warn("Failed to read job cache", e);
     }
 
-    const lastCheckKey = 'last_job_check_timestamp';
-    const now = Date.now();
-    let shouldCheckForUpdates = force;
-
+    // New or first-time visit without cache: Show standard spinner
     if (!hasCachedData) {
       setLoading(true);
       setIsFirstVisit(true);
-      shouldCheckForUpdates = true;
-      localStorage.setItem(lastCheckKey, now.toString());
-    } else if (!force) {
-      const lastCheck = localStorage.getItem(lastCheckKey);
-      const hoursSinceLastCheck = lastCheck ? (now - parseInt(lastCheck, 10)) / (1000 * 60 * 60) : Infinity;
-      
-      if (hoursSinceLastCheck >= 12) {
-        shouldCheckForUpdates = true;
-        setUpdateStatus('checking');
-        localStorage.setItem(lastCheckKey, now.toString());
-      }
-    } else {
-      setUpdateStatus('checking');
-      localStorage.setItem(lastCheckKey, now.toString());
-    }
-    
-    if (!shouldCheckForUpdates) {
-      // Skip background check if already checked today
-      return;
     }
 
-    // Background Full Load
+    // Set checking status indicator
+    setUpdateStatus('checking');
+
+    // Background Full Load from fast Firestore proxy API
     try {
       const timestamp = Date.now();
       const response = await axios.get(`/api/jobs?full=true&t=${timestamp}`);
       const data = response.data;
       
       if (Array.isArray(data) && data.length > 0) {
-        // Refresh cache in background
+        // Save to cache
         try {
           localStorage.setItem(CACHE_KEY, JSON.stringify({
             lastSyncTime: Date.now(),
@@ -920,49 +975,50 @@ export default function App() {
           try {
              localStorage.setItem(CACHE_KEY, JSON.stringify({
                lastSyncTime: Date.now(),
-               jobs: data.slice(0, 250) // Fallback to smaller subset
+               jobs: data.slice(0, 250) // Fallback list
              }));
           } catch (e2) {
              console.error("Cache fallback failed", e2);
           }
         }
         
-        // Always store all known IDs separately (takes very little space) to avoid false "new job" alerts
+        // Save known IDs
         let lastKnownIds: string[] = [];
         try {
            const stored = localStorage.getItem('last_known_ids');
            if (stored) lastKnownIds = JSON.parse(stored);
            const allIds = Array.from(new Set([...lastKnownIds, ...data.map((j: Job) => String(j.id))]));
-           localStorage.setItem('last_known_ids', JSON.stringify(allIds.slice(0, 500))); // keep last 500
+           localStorage.setItem('last_known_ids', JSON.stringify(allIds.slice(0, 500)));
         } catch (e) {
            // ignore
         }
 
-        if (hasCachedData) {
-          const existingIds = new Set(jobsRef.current.map(j => String(j.id)));
-          const knownIdsSet = new Set(lastKnownIds);
-          const existingTitles = new Set(jobsRef.current.map(j => j.title.toLowerCase()));
+        if (hasCachedData && cachedJobs.length > 0) {
+          // Compare cached list with backend response
+          const cachedIds = new Set(cachedJobs.map(j => String(j.id)));
+          const cachedTitles = new Set(cachedJobs.map(j => j.title.toLowerCase()));
           
-          const newJobs = data.filter(j => !existingIds.has(String(j.id)) && !knownIdsSet.has(String(j.id)) && !existingTitles.has(j.title.toLowerCase()));
+          const newJobs = data.filter(j => !cachedIds.has(String(j.id)) && !cachedTitles.has(j.title.toLowerCase()));
           
-          if (newJobs.length > 0 && jobsRef.current.length > 0) {
-             // Instant show new jobs
-             setJobs(data);
-             setUpdateStatus('updated');
-             setTimeout(() => setUpdateStatus('idle'), 6000);
+          if (newJobs.length > 0) {
+            // Found fresh active jobs! Update and notify the user beautifully.
+            setJobs(data);
+            setUpdateStatus('updated');
+            setTimeout(() => setUpdateStatus('idle'), 6000);
           } else {
-             // If no completely new items, just update items silently
-             setJobs(data);
-             setUpdateStatus('up-to-date');
-             setTimeout(() => setUpdateStatus('idle'), 3000);
+            // Already fully synchronized
+            setJobs(data);
+            setUpdateStatus('up-to-date');
+            setTimeout(() => setUpdateStatus('idle'), 3000);
           }
         } else {
+          // No cache existed prior, load instantly and go idle
           setJobs(data);
           setLoading(false);
           setUpdateStatus('idle');
         }
       } else {
-        if (hasCachedData) setUpdateStatus('idle');
+        setUpdateStatus('idle');
       }
     } catch (error) {
       console.error('Failed to fetch jobs:', error);
@@ -1336,6 +1392,18 @@ export default function App() {
                       </motion.p>
                     )}
                   </AnimatePresence>
+
+                  {/* Google Indexing API Dashboard Trigger */}
+                  <button
+                    onClick={() => {
+                      setShowIndexingConsole(true);
+                      checkIndexingStatus();
+                    }}
+                    className="w-full mt-1.5 flex items-center justify-center gap-2 px-4 py-2 rounded bg-emerald-950/30 hover:bg-emerald-900/40 text-emerald-400 hover:text-emerald-300 border border-emerald-500/20 active:scale-95 cursor-pointer text-[11px] font-bold transition-all duration-200 shadow"
+                  >
+                    <Sparkles size={13} className="text-emerald-400" />
+                    Google Search Indexer
+                  </button>
                 </div>
 
                 <div className="text-[11px] text-[#475569] leading-relaxed whitespace-nowrap text-center">
@@ -2162,6 +2230,223 @@ export default function App() {
                   className="flex-1 py-3 px-4 bg-rose-500 text-white font-bold rounded-xl hover:bg-rose-600 transition-colors"
                 >
                   হ্যাঁ (Yes)
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showIndexingConsole && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowIndexingConsole(false)}
+              className="absolute inset-0 bg-slate-900/45 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.98, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.98, y: 10 }}
+              className="relative bg-slate-900 text-slate-100 w-full max-w-2xl max-h-[85vh] rounded-2xl shadow-2xl overflow-y-auto flex flex-col border border-emerald-500/20"
+            >
+              {/* Header */}
+              <div className="p-5 border-b border-white/10 flex items-center justify-between sticky top-0 bg-slate-900/90 backdrop-blur-md z-10">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="text-emerald-400" size={20} />
+                  <div>
+                    <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+                      গুগল সার্চ ইনডেক্সিং কনসোল
+                    </h2>
+                    <p className="text-[10px] text-[#94a3b8]">Google Webmaster Indexing API Assistant</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowIndexingConsole(false)}
+                  className="p-1.5 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white transition-colors cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="p-6 space-y-6 flex-1">
+                {/* Connection Status Card */}
+                <div className="p-4 rounded-xl bg-slate-950 border border-white/5 space-y-3">
+                  <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-wider">সার্ভার সংযোগ এবং কনফিগারেশন স্ট্যাটাস</h3>
+                  {isCheckingIndexing ? (
+                    <div className="flex items-center gap-3 text-slate-400 text-xs py-2">
+                      <Loader2 className="animate-spin text-emerald-400" size={16} />
+                      কনফিগারেশন যাচাই করা হচ্ছে...
+                    </div>
+                  ) : indexingStatusResponse ? (
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2">
+                        <div className={cn(
+                          "w-2.5 h-2.5 rounded-full",
+                          indexingStatusResponse.configured ? "bg-emerald-400 animate-pulse" : "bg-rose-400 animate-pulse"
+                        )} />
+                        <span className="text-xs font-semibold">
+                          {indexingStatusResponse.configured ? "সক্রিয় (Google Indexing is Configured)" : "নিষ্ক্রিয় (Not Configured)"}
+                        </span>
+                      </div>
+
+                      {indexingStatusResponse.configured ? (
+                        <div className="text-[11px] text-[#94a3b8] space-y-1 bg-slate-900/60 p-3 rounded-lg border border-white/5">
+                          <p><strong className="text-slate-300">সার্ভিস একাউন্ট ইমেইল:</strong> <span className="font-mono text-[10px] text-emerald-400">{indexingStatusResponse.clientEmail}</span></p>
+                          <div className="text-[#a7f3d0] bg-emerald-500/10 p-2 rounded mt-2 border border-emerald-500/10 text-[10px]">
+                            🔔 আপনার ডোমেইন সার্চ কনসোলে (<a href="https://search.google.com/search-console" target="_blank" rel="noopener noreferrer" className="underline font-bold hover:text-emerald-300">Google Search Console</a>) এই ইমেইল আইডিটিকে অবশ্যই <strong>Owner/অনুমোদিত ইউজার</strong> হিসেবে এড করুন, না হলে গুগল ইনডেক্সিং এর অনুমতি দিবে না।
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-rose-300 bg-rose-500/10 p-3 rounded-lg border border-rose-500/10 leading-relaxed">
+                          ⚠️ Google Service Account কী বা Environment variables যুক্ত করা হয়নি। নিচে দেওয়া নির্দেশিকা অনুযায়ী কী সেটআপ করুন।
+                        </div>
+                      )}
+
+                      {indexingStatusResponse.stats && (
+                        <div className="grid grid-cols-3 gap-3 pt-1">
+                          <div className="bg-slate-900 p-2.5 rounded-lg text-center border border-white/5">
+                            <div className="text-base font-bold text-[#f8fafc]">{indexingStatusResponse.stats.totalChecked}</div>
+                            <div className="text-[9px] text-[#94a3b8]">মোট পোস্ট স্টোরড</div>
+                          </div>
+                          <div className="bg-slate-900 p-2.5 rounded-lg text-center border border-white/5">
+                            <div className="text-base font-bold text-emerald-400">{indexingStatusResponse.stats.totalIndexed}</div>
+                            <div className="text-[9px] text-[#94a3b8]">গুগল ইনডেক্সড</div>
+                          </div>
+                          <div className="bg-slate-900 p-2.5 rounded-lg text-center border border-white/5">
+                            <div className="text-base font-bold text-amber-500">{indexingStatusResponse.stats.totalPending}</div>
+                            <div className="text-[9px] text-[#94a3b8]">পেন্ডিং ইনডেক্স</div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <button 
+                      onClick={checkIndexingStatus}
+                      className="text-xs px-3 py-1.5 bg-slate-905 bg-slate-900 hover:bg-slate-800 rounded border border-white/10 text-slate-300 cursor-pointer transition-colors"
+                    >
+                      স্ট্যাটাস লোড করুন (Load Status)
+                    </button>
+                  )}
+                </div>
+
+                {/* Automation trigger button for batch indexing */}
+                {indexingStatusResponse?.configured && indexingStatusResponse?.stats?.totalPending > 0 && (
+                  <div className="flex flex-col gap-2 p-4 rounded-xl bg-emerald-950/20 border border-emerald-500/10">
+                    <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">তাত্ক্ষণিক বাল্ক ইনডেক্সিং</span>
+                    <p className="text-xs text-slate-300">firestore-এ থাকা মোট {indexingStatusResponse.stats.totalPending} টি পেন্ডিং সার্কুলার এর ইউআরএল গুগল ইনডেক্সিং API এ পুশ করবেন? (প্রতিদিন সর্বোচ্চ ২০০ রিকোয়েস্ট করা যাবে)</p>
+                    <button
+                      onClick={runBulkAutoIndexing}
+                      disabled={googleIndexingLoading}
+                      className="mt-2 text-xs py-2 px-4 bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-800 text-white font-bold rounded-lg transition-transform hover:scale-[1.01] active:scale-95 disabled:scale-100 flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      {googleIndexingLoading ? (
+                        <>
+                          <Loader2 size={14} className="animate-spin" />
+                          ইনডেক্সিং হচ্ছে...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles size={14} />
+                          পেন্ডিং সার্কুলার গুলো ইনডেক্স করুন
+                        </>
+                      )}
+                    </button>
+                    {googleIndexingResponse && (
+                      <div className="mt-2 text-[10px] font-mono p-2 bg-slate-950 rounded text-[#e2e8f0] overflow-x-auto select-all max-h-[120px]">
+                        {JSON.stringify(googleIndexingResponse, null, 2)}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Manual Url indexing box */}
+                {indexingStatusResponse?.configured && (
+                  <div className="p-4 rounded-xl bg-slate-950 border border-white/5 space-y-3">
+                    <h3 className="text-xs font-bold text-[#e2e8f0] uppercase tracking-wider">ম্যানুয়ালি একটি ইউআরএল ইনডেক্স করুন (Single URL Test)</h3>
+                    <form onSubmit={handleManualUrlIndex} className="flex gap-2">
+                      <input
+                        type="url"
+                        placeholder="https://jobs.talukdaracademy.com.bd/jobs/assistant-director-job-circular"
+                        required
+                        value={manualIndexingUrl}
+                        onChange={(e) => setManualIndexingUrl(e.target.value)}
+                        className="flex-1 bg-slate-900 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono"
+                      />
+                      <button
+                        type="submit"
+                        disabled={manualIndexingLoading || !manualIndexingUrl}
+                        className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-xs font-bold rounded-lg text-[#f8fafc] cursor-pointer"
+                      >
+                        {manualIndexingLoading ? <Loader2 size={13} className="animate-spin" /> : "ইনডেক্স পুশ"}
+                      </button>
+                    </form>
+                    {manualIndexingResult && (
+                      <div className="p-2.5 bg-emerald-950/20 text-[10px] font-mono text-emerald-400 rounded-lg border border-emerald-500/15 overflow-x-auto max-h-[150px]">
+                        <strong>সফল হয়েছে:</strong>
+                        <pre className="mt-1 whitespace-pre-wrap">{JSON.stringify(manualIndexingResult, null, 2)}</pre>
+                      </div>
+                    )}
+                    {manualIndexingError && (
+                      <div className="p-2.5 bg-rose-950/20 text-[10px] font-mono text-rose-400 rounded-lg border border-rose-500/15 overflow-x-auto max-h-[150px]">
+                        <strong>ত্রুটি:</strong>
+                        <pre className="mt-1 whitespace-pre-wrap">{manualIndexingError}</pre>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Step-by-Step Instructions */}
+                <div className="space-y-3">
+                  <h3 className="text-xs font-bold text-[#e2e8f0] uppercase tracking-wider">গুগল ইনডেক্সিং API সেটআপ নির্দেশিকা (Setup Guide)</h3>
+                  <div className="text-xs space-y-3.5 text-slate-300 bg-slate-950 p-4 rounded-xl border border-white/5 leading-relaxed">
+                    <div>
+                      <p className="font-semibold text-emerald-400">ধাপ ১: Google Cloud Console-এ সার্ভিস কী নিন</p>
+                      <ul className="list-disc pl-5 mt-1 text-[#94a3b8] space-y-1">
+                        <li>Google Cloud Console (<a href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer" className="underline hover:text-white">console.cloud.google.com</a>) এ যেকোনো গুগল এককাউন্ট দিয়ে লগইন করুন এবং একটি নতুন প্রজেক্ট তৈরি করুন।</li>
+                        <li>সার্চ বারে <strong>“Webmaster Tools API”</strong> বা <strong>“Indexing API”</strong> লিখে খুঁজুন এবং সেটি <strong>Enable</strong> করুন।</li>
+                        <li><strong>IAM & Admin &gt; Service Accounts</strong> এ গিয়ে একটি সার্ভিস একাউন্ট তৈরি করুন।</li>
+                        <li>সার্ভিস একাউন্টের আইডিটিতে ক্লিক করে <strong>Keys</strong> ট্যাবে যান এবং <strong>Add Key &gt; Create New Key (JSON)</strong> সিলেক্ট করুন। কম্পিউটার এ ডাউনলোড হওয়া এই JSON ফাইলটি নিরাপদে সেভ রাখুন।</li>
+                      </ul>
+                    </div>
+
+                    <div className="border-t border-white/5 pt-3">
+                      <p className="font-semibold text-emerald-400">ধাপ ২: সার্ভারে কী যুক্ত করুন (Environment Config)</p>
+                      <ul className="list-disc pl-5 mt-1 text-[#94a3b8] space-y-1">
+                        <li>উপরে ডাউনলোড করা JSON ফাইলটির সমস্ত কন্টেন্ট কপি করুন।</li>
+                        <li>আপনার Vercel প্রজেক্ট ড্যাশবোর্ড বা হোস্টিং ড্যাশবোর্ডে <strong>Settings &gt; Environment Variables</strong> অপশনে যান।</li>
+                        <li>সেখানে Key হিসেবে <strong>GOOGLE_SERVICE_ACCOUNT_KEY</strong> লিখুন এবং Value হিসেবে কপি করা পুরো JSON টেক্সটটি পেস্ট করে সেভ ও ডিপ্লয় করুন।</li>
+                      </ul>
+                    </div>
+
+                    <div className="border-t border-white/5 pt-3">
+                      <p className="font-semibold text-emerald-400">ধাপ ৩: সার্চ কনসোলে সার্ভিস একাউন্ট ইমেইল লিঙ্ক করুন</p>
+                      <ul className="list-disc pl-5 mt-1 text-[#94a3b8] space-y-1">
+                        <li>ডাউনলোড করা JSON ফাইলটির ভেতরে থাকা <code>client_email</code> এড্রেসটি কপি করুন (এটি দেখতে এরকম হবে: <code>service-account-name@xyz...iam.gserviceaccount.com</code>)।</li>
+                        <li>আপনার Google Search Console ড্যাশবোর্ডে যান এবং আপনার ওয়েবসাইট প্রপার্টিতে ক্লিক করুন।</li>
+                        <li>বাম প্যানেল থেকে <strong>Settings &gt; Users and permissions &gt; Add User</strong> এ ক্লিক করুন।</li>
+                        <li>কপি করা সার্ভিস একাউন্ট ইমেইলটি পেস্ট করুন এবং পারমিশন লেভেল <strong>Owner</strong> সিলেক্ট করে সেভ করুন।</li>
+                      </ul>
+                    </div>
+
+                    <p className="text-[11px] text-amber-300 bg-amber-500/5 p-2 rounded border border-amber-500/10">
+                      💡 সেটআপ সফলভাবে সমাপ্ত হলে, ইউজার রিফ্রেশ করলে অথবা প্রতি ৬ ঘণ্টা পরপর ব্যাকগ্রাউন্ডে যখনই নতুন সরকারি বা বেসরকারি চাকরির সার্কুলার ফায়ারবেজ থেকে লোড হবে—অ্যাপটি <strong>সম্পূর্ণ স্বয়ংক্রিয়ভাবে ও তাত্ক্ষণিকভাবে</strong> নতুন পোস্টগুলো Google Search engine-এ ইনডেক্স করার সিগন্যাল পাঠিয়ে দিবে!
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="p-4 border-t border-white/10 bg-slate-950 flex justify-end gap-2">
+                <button
+                  onClick={() => setShowIndexingConsole(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-semibold cursor-pointer text-white"
+                >
+                  বন্ধ করুন (Close)
                 </button>
               </div>
             </motion.div>

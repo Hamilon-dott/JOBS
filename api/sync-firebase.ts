@@ -1,6 +1,7 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, getDocs, doc, setDoc, query, orderBy, limit, deleteDoc, writeBatch } from 'firebase/firestore';
+import { getFirestore, collection, getDocs, doc, setDoc, query, orderBy, limit, deleteDoc, writeBatch, updateDoc } from 'firebase/firestore';
+import { google } from 'googleapis';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import https from 'https';
@@ -404,6 +405,114 @@ async function cleanupExpired(firestoreDb: any) {
   }
 }
 
+// Helper to parse/get Service Account credentials
+function getGoogleCredentials() {
+  if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+    try {
+      const parsed = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
+      return {
+        clientEmail: parsed.client_email,
+        privateKey: parsed.private_key
+      };
+    } catch (e: any) {
+      console.warn("Could not parse GOOGLE_SERVICE_ACCOUNT_KEY env string:", e.message);
+    }
+  }
+
+  if (process.env.GOOGLE_CLIENT_EMAIL && process.env.GOOGLE_PRIVATE_KEY) {
+    return {
+      clientEmail: process.env.GOOGLE_CLIENT_EMAIL,
+      privateKey: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n')
+    };
+  }
+
+  try {
+    const localFilePath = path.join(process.cwd(), 'service-account.json');
+    if (fs.existsSync(localFilePath)) {
+      const parsed = JSON.parse(fs.readFileSync(localFilePath, 'utf-8'));
+      return {
+        clientEmail: parsed.client_email,
+        privateKey: parsed.private_key
+      };
+    }
+  } catch (e: any) {
+    console.warn("Could not load local service-account.json:", e.message);
+  }
+
+  return null;
+}
+
+// Automatically index new/updated URLs via Google Indexing API
+async function runGoogleIndexing(firestoreDb: any, baseUrl: string) {
+  try {
+    const creds = getGoogleCredentials();
+    if (!creds || !creds.clientEmail || !creds.privateKey) {
+      console.log("Google Indexing is disabled: credentials not configured in env or service-account.json.");
+      return { status: "not_configured" };
+    }
+
+    const jwtClient = new google.auth.JWT({
+      email: creds.clientEmail,
+      key: creds.privateKey,
+      scopes: ['https://www.googleapis.com/auth/indexing']
+    });
+
+    await jwtClient.authorize();
+    const indexing = google.indexing({
+      version: 'v3',
+      auth: jwtClient
+    });
+
+    // Query latest jobs from Firestore
+    const jobsRef = collection(firestoreDb, 'jobs');
+    const q = query(jobsRef, orderBy('publishedDate', 'desc'), limit(100));
+    const snapshot = await getDocs(q);
+
+    const pendingJobs = snapshot.docs
+      .map(d => ({ id: d.id, ...d.data() as any }))
+      .filter(j => !j.isGoogleIndexed && j.slug)
+      .slice(0, 30); // Index up to 30 new jobs per run to avoid hitting Google quotas too fast
+
+    if (pendingJobs.length === 0) {
+      console.log("Google Indexing: All jobs are already indexed.");
+      return { status: "no_pending_jobs", count: 0 };
+    }
+
+    console.log(`Google Indexing: Found ${pendingJobs.length} non-indexed jobs. Submitting URLs to Indexing API...`);
+    let count = 0;
+    
+    for (const job of pendingJobs) {
+      const targetUrl = `${baseUrl}/jobs/${job.slug}`;
+      try {
+        await indexing.urlNotifications.publish({
+          requestBody: {
+            url: targetUrl,
+            type: 'URL_UPDATED'
+          }
+        });
+
+        const docRef = doc(firestoreDb, 'jobs', job.id);
+        await updateDoc(docRef, {
+          isGoogleIndexed: true,
+          googleIndexedAt: new Date().toISOString()
+        });
+        count++;
+      } catch (err: any) {
+        console.error(`Google Indexing failed for URL ${targetUrl}:`, err.message);
+        if (err.message?.includes('Quota') || err.message?.includes('429')) {
+          break;
+        }
+      }
+    }
+
+    console.log(`Google Indexing: Successfully submitted ${count} jobs to Google.`);
+    return { status: "success", count };
+  } catch (error: any) {
+    console.error("Google Indexing automated run failed:", error.message);
+    return { status: "error", error: error.message };
+  }
+}
+
 // Serverless Handler Entrypoint
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
@@ -438,13 +547,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       syncedCount += chunk.length;
     }
 
+    const isLocalhost = (req.headers.host || '').includes('localhost');
+    const protocol = req.headers['x-forwarded-proto'] || 'https';
+    const domainHost = req.headers.host || 'jobs.talukdaracademy.com.bd';
+    const baseUrl = isLocalhost ? `${protocol}://${domainHost}` : 'https://jobs.talukdaracademy.com.bd';
+
+    // Run Google Indexing on newly synced jobs
+    const googleIndexingResult = await runGoogleIndexing(firestoreDb, baseUrl);
+
     return res.status(200).json({
       success: true,
       message: `Sync complete successfully on Vercel. Synced ${syncedCount} jobs.`,
       stats: {
         cleanedCount,
         syncedCount,
-        totalWPFetched: jobs.length
+        totalWPFetched: jobs.length,
+        googleIndexing: googleIndexingResult
       }
     });
   } catch (error: any) {
