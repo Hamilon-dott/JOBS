@@ -1,11 +1,58 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
+import { initializeApp } from 'firebase/app';
+import { getFirestore, collection, getDocs, doc, query, orderBy, limit } from 'firebase/firestore';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import https from 'https';
+import fs from 'fs';
+import path from 'path';
 
 const httpsAgent = new https.Agent({  
   rejectUnauthorized: false
 });
+
+// Initialize Firebase from environment variables or local config
+let firebaseApp: any;
+let db: any;
+
+const initializeFirebaseInVercel = () => {
+  if (db) return db;
+  
+  let firebaseConfig: any;
+  let firestoreDatabaseId: string | undefined;
+
+  if (process.env.FIREBASE_API_KEY) {
+    firebaseConfig = {
+      apiKey: process.env.FIREBASE_API_KEY,
+      authDomain: process.env.FIREBASE_AUTH_DOMAIN,
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+      messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
+      appId: process.env.FIREBASE_APP_ID,
+      measurementId: process.env.FIREBASE_MEASUREMENT_ID || ""
+    };
+    firestoreDatabaseId = process.env.FIREBASE_FIRESTORE_DATABASE_ID;
+  } else {
+    const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+    if (fs.existsSync(configPath)) {
+      const configData = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      firebaseConfig = configData;
+      firestoreDatabaseId = configData.firestoreDatabaseId;
+    } else {
+      console.warn("Firebase configuration not found. Will default to local parsing fallback.");
+      return null;
+    }
+  }
+
+  try {
+    firebaseApp = initializeApp(firebaseConfig);
+    db = getFirestore(firebaseApp, firestoreDatabaseId);
+    return db;
+  } catch (err) {
+    console.error("Firebase init error:", err);
+    return null;
+  }
+};
 
 // Slug generation function
 function generateSlug(title: string, orgName?: string | null, fallbackId?: string): string {
@@ -33,68 +80,154 @@ function generateSlug(title: string, orgName?: string | null, fallbackId?: strin
   return slug || fallbackId || '';
 }
 
-async function fetchLatestJobs(isFull: boolean = false) {
-  const jobs: any[] = [];
+// Convert Bengali numerals & month words to English Dates
+const parseDeadline = (deadlineStr: string): Date | null => {
+  if (!deadlineStr || deadlineStr.includes('দেখুন') || deadlineStr.includes('চলমান')) return null;
   
-  // Helper to parse Bengali/English deadline strings
-  const parseDeadline = (deadlineStr: string): Date | null => {
-    if (!deadlineStr || deadlineStr.includes('দেখুন') || deadlineStr.includes('চলমান')) return null;
-    
-    // Convert Bengali numerals to English
-    const bengaliToEnglish = (str: string) => {
-      const numerals: { [key: string]: string } = {
-        '০': '0', '১': '1', '২': '2', '৩': '3', '৪': '4', '৫': '5', '৬': '6', '৭': '7', '৮': '8', '৯': '9'
-      };
-      return str.replace(/[০-৯]/g, d => numerals[d]);
+  const bengaliToEnglish = (str: string) => {
+    const numerals: { [key: string]: string } = {
+      '০': '0', '১': '1', '২': '2', '৩': '3', '৪': '4', '৫': '5', '৬': '6', '৭': '7', '৮': '8', '৯': '9'
     };
-
-    let cleanStr = bengaliToEnglish(deadlineStr);
-    
-    // Support common separators
-    cleanStr = cleanStr.replace(/[।\/]/g, '-').replace(/\s+/g, ' ').trim();
-
-    // Mapping for Bengali months
-    const months: { [key: string]: string } = {
-      'জানুয়ারি': 'January', 'জানুয়ারী': 'January',
-      'ফেব্রুয়ারি': 'February', 'ফেব্রুয়ারী': 'February',
-      'মার্চ': 'March',
-      'এপ্রিল': 'April',
-      'মে': 'May',
-      'জুন': 'June',
-      'জুলাই': 'July',
-      'আগস্ট': 'August', 'আগষ্ট': 'August',
-      'সেপ্টেম্বর': 'September', 'সেপ্টেম্বার': 'September',
-      'অক্টোবর': 'October', 'অক্টোবার': 'October',
-      'নভেম্বর': 'November', 'নভেম্বার': 'November',
-      'ডিসেম্বর': 'December', 'ডিসেম্বার': 'December'
-    };
-
-    Object.keys(months).forEach(m => {
-      cleanStr = cleanStr.replace(new RegExp(m, 'i'), months[m]);
-    });
-
-    // Handle DD-MM-YYYY or DD-Month-YYYY
-    const parts = cleanStr.split(/[-\s]/);
-    if (parts.length >= 3) {
-      // Try to reformat for JS Date if parts are like [30, May, 2024]
-      const day = parts[0];
-      const month = parts[1];
-      const year = parts[2];
-      
-      // If month is a number (05), ensure it works. 
-      // JavaScript Date handles "2024-05-30" better than "30-05-2024"
-      if (!isNaN(parseInt(day)) && !isNaN(parseInt(month)) && !isNaN(parseInt(year))) {
-        if (year.length === 4) {
-           cleanStr = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-        }
-      }
-    }
-
-    const date = new Date(cleanStr);
-    return isNaN(date.getTime()) ? null : date;
+    return str.replace(/[০-৯]/g, d => numerals[d]);
   };
 
-  // List of WP-API sources for full content
+  let cleanStr = bengaliToEnglish(deadlineStr);
+  cleanStr = cleanStr.replace(/[।\/]/g, '-').replace(/\s+/g, ' ').trim();
+
+  const months: { [key: string]: string } = {
+    'জানুয়ারি': 'January', 'জানুয়ারী': 'January',
+    'ফেব্রুয়ারি': 'February', 'ফেব্রুয়ারী': 'February',
+    'মার্চ': 'March',
+    'এপ্রিল': 'April',
+    'মে': 'May',
+    'জুন': 'June',
+    'জুলাই': 'July',
+    'আগস্ট': 'August', 'আগষ্ট': 'August',
+    'সেপ্টেম্বর': 'September', 'সেপ্টেম্বার': 'September',
+    'অক্টোবর': 'October', 'অক্টোবার': 'October',
+    'নভেম্বর': 'November', 'নভেম্বার': 'November',
+    'ডিসেম্বর': 'December', 'ডিসেম্বার': 'December'
+  };
+
+  Object.keys(months).forEach(m => {
+    cleanStr = cleanStr.replace(new RegExp(m, 'i'), months[m]);
+  });
+
+  const parts = cleanStr.split(/[-\s]/);
+  if (parts.length >= 3) {
+    const day = parts[0];
+    const month = parts[1];
+    const year = parts[2];
+    if (!isNaN(parseInt(day)) && !isNaN(parseInt(month)) && !isNaN(parseInt(year))) {
+      if (year.length === 4) {
+         cleanStr = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+      }
+    }
+  }
+
+  const date = new Date(cleanStr);
+  return isNaN(date.getTime()) ? null : date;
+};
+
+// Custom Bengali Date Extractor for precise publication date
+const parseBengaliDate = (dateStr: string): Date | null => {
+  if (!dateStr) return null;
+  
+  const bengaliToEnglish = (str: string) => {
+    const numerals: { [key: string]: string } = {
+      '০': '0', '১': '1', '২': '2', '৩': '3', '৪': '4', '৫': '5', '৬': '6', '৭': '7', '৮': '8', '৯': '9'
+    };
+    return str.replace(/[০-৯]/g, d => numerals[d]);
+  };
+
+  let cleanStr = dateStr.replace(/[।\.]/g, '').replace(/\s+/g, ' ').trim();
+  const parts = cleanStr.split(/[,&|\sওএবং]+/);
+  
+  const monthsList = [
+    'জানুয়ারি', 'জানুয়ারী', 'ফেব্রুয়ারি', 'ফেব্রুয়ারী', 'মার্চ', 'এপ্রিল', 
+    'মে', 'জুন', 'জুলাই', 'আগস্ট', 'আগষ্ট', 'সেপ্টেম্বর', 'সেপ্টেম্বার', 
+    'অক্টোবর', 'অক্টোবার', 'নভেম্বর', 'নভেম্বার', 'ডিসেম্বর', 'ডিসেম্বার'
+  ];
+
+  const monthsMap: { [key: string]: string } = {
+    'জানুয়ারি': 'January', 'জানুয়ারী': 'January',
+    'ফেব্রুয়ারি': 'February', 'ফেব্রুয়ারী': 'February',
+    'মার্চ': 'March', 'এপ্রিল': 'April', 'মে': 'May', 'জুন': 'June', 'জুলাই': 'July',
+    'আগস্ট': 'August', 'আগষ্ট': 'August',
+    'সেপ্টেম্বর': 'September', 'সেপ্টেম্বার': 'September',
+    'অক্টোবর': 'October', 'অক্টোবার': 'October',
+    'নভেম্বর': 'November', 'নভেম্বার': 'November',
+    'ডিসেম্বর': 'December', 'ডিসেম্বার': 'December'
+  };
+
+  let year: string | null = null;
+  let month: string | null = null;
+  let day: string | null = null;
+
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const part = parts[i].trim();
+    const cleanPart = bengaliToEnglish(part);
+    
+    if (!year && /^\d{4}$/.test(cleanPart)) {
+      year = cleanPart;
+      continue;
+    }
+    const lowerPart = part.toLowerCase();
+    const matchedMonthKey = monthsList.find(m => lowerPart.includes(m));
+    if (!month && matchedMonthKey) {
+      month = monthsMap[matchedMonthKey];
+      continue;
+    }
+    if (!day && /^\d{1,2}$/.test(cleanPart)) {
+      day = cleanPart;
+      continue;
+    }
+  }
+
+  if (year && month && day) {
+    const dateFormattedStr = `${day} ${month} ${year}`;
+    const date = new Date(dateFormattedStr);
+    if (!isNaN(date.getTime())) {
+      return date;
+    }
+  }
+  return null;
+};
+
+async function fetchLatestJobsFromFirestore(isFull: boolean = false) {
+  try {
+    const firestoreDb = initializeFirebaseInVercel();
+    if (!firestoreDb) return null;
+
+    const jobsRef = collection(firestoreDb, 'jobs');
+    const limitCount = isFull ? 500 : 40;
+    const q = query(jobsRef, orderBy('publishedDate', 'desc'), limit(limitCount));
+    const snapshot = await getDocs(q);
+    
+    if (snapshot.empty) {
+      return null;
+    }
+    
+    return snapshot.docs.map(doc => {
+      const data = doc.data();
+      delete data._syncToken;
+      return data;
+    });
+  } catch (err: any) {
+    console.error("Vercel Firestore read error in fetchLatestJobsFromFirestore:", err.message);
+    return null;
+  }
+}
+
+async function fetchLatestJobs(isFull: boolean = false) {
+  // Try Firestore first!
+  const firestoreData = await fetchLatestJobsFromFirestore(isFull);
+  if (firestoreData && firestoreData.length > 0) {
+    return firestoreData;
+  }
+
+  // Backup fallback: Parse live WordPress API
+  const jobs: any[] = [];
   const sources = [
     { name: 'BD Govt Job', baseUrl: 'https://bdgovtjob.net/wp-json/wp/v2/posts?_embed' }
   ];
@@ -109,9 +242,8 @@ async function fetchLatestJobs(isFull: boolean = false) {
 
   for (const source of sources) {
     try {
-      console.log(`Fetching from: ${source.name} (Full: ${isFull})...`);
+      console.log(`Fallback fetching from: ${source.name} (Full: ${isFull})...`);
       
-      // Fetch multiple pages until we hit target or limit
       for (let page = 1; page <= maxSearchPages; page++) {
         if (jobs.length >= targetCount) break;
 
@@ -130,7 +262,6 @@ async function fetchLatestJobs(isFull: boolean = false) {
             const titleText = title.replace(/&#8211;/g, '-').replace(/&#8217;/g, "'").replace(/<\/?[^>]+(>|$)/g, "").trim();
             
             if (seenTitles.has(titleText.toLowerCase())) return;
-            
 
             const rawContent = post.content?.rendered || "";
             const $ = cheerio.load(rawContent);
@@ -161,14 +292,11 @@ async function fetchLatestJobs(isFull: boolean = false) {
             };
 
             const deadline = extractFromTableOrText(['আবেদনের শেষ তারিখ', 'আবেদনের শেষ সময়', 'আবেদন শেষ', 'Last Date', 'Deadline']) || "সার্কুলার দেখুন";
-            
-            // STRICT FILTER: Skip if deadline passed more than 30 days ago
             const deadlineDate = parseDeadline(deadline);
             if (deadlineDate && deadlineDate < thirtyDaysAgo) {
               return; 
             }
 
-            // Fallback: Skip very old posts (published > 90 days ago) if deadline is unknown
             const pubDate = new Date(post.date);
             const ninetyDaysAgo = new Date();
             ninetyDaysAgo.setDate(today.getDate() - 90);
@@ -178,7 +306,6 @@ async function fetchLatestJobs(isFull: boolean = false) {
 
             seenTitles.add(titleText.toLowerCase());
 
-            // Improved Image Extraction (Multiple)
             const imgMatches = rawContent.matchAll(/src=["']([^"'>]+\.(?:jpg|jpeg|png|webp|gif)[^"'>]*)["']/gi);
             const imageUrls = Array.from(imgMatches, m => m[1]);
 
@@ -240,15 +367,28 @@ async function fetchLatestJobs(isFull: boolean = false) {
               }
             });
 
+            // Get exact published date
+            const pubDateText = extractFromTableOrText(['বিজ্ঞপ্তি প্রকাশের তারিখ', 'প্রকাশের তারিখ', 'বিজ্ঞপ্তি প্রকাশ', 'Publish Date', 'Published Date']);
+            let finalPubDate = pubDate;
+            if (pubDateText) {
+              const parsedCustom = parseBengaliDate(pubDateText);
+              if (parsedCustom && !isNaN(parsedCustom.getTime())) {
+                const yr = parsedCustom.getFullYear();
+                if (yr >= 2024 && yr <= 2030) {
+                  finalPubDate = parsedCustom;
+                }
+              }
+            }
+
             if (cleanContent.length > 50) {
-              const pubDate = new Date(post.date);
               jobs.push({
                 id: `${post.id}`,
                 slug: generateSlug(titleText, orgName, post.slug ? post.slug.toString() : `${post.id}`),
                 title: titleText,
                 organization: orgName,
-                publishedDate: pubDate.toISOString(), // Standard ISO format
+                publishedDate: finalPubDate.toISOString(),
                 deadline: deadline,
+                deadlineISO: deadlineDate ? deadlineDate.toISOString() : null,
                 remainingDays: remainingDays,
                 startTime: startTime,
                 applyMethod: applyMethod,
@@ -263,7 +403,7 @@ async function fetchLatestJobs(isFull: boolean = false) {
             }
           });
         } else {
-          break; // No more pages
+          break;
         }
       }
     } catch (e: any) {
@@ -286,6 +426,7 @@ async function fetchLatestJobs(isFull: boolean = false) {
         const pubDate = new Date(item.pubDate);
         jobs.push({
           id: `rss-${i}`,
+          slug: generateSlug(item.title.replace(/&#8211;/g, '-').replace(/&#8217;/g, "'"), "Job Circular") + `-${i}`,
           title: item.title.replace(/&#8211;/g, '-').replace(/&#8217;/g, "'"),
           organization: "Job Circular",
           publishedDate: pubDate.toISOString(),
@@ -307,6 +448,7 @@ async function fetchLatestJobs(isFull: boolean = false) {
   return [
     {
       id: "f1",
+      slug: "assistant-director-bangladesh-bank",
       title: "Assistant Director (General) - 100 Posts",
       organization: "Bangladesh Bank",
       publishedDate: todayDate,
@@ -319,15 +461,38 @@ async function fetchLatestJobs(isFull: boolean = false) {
   ];
 }
 
-async function fetchSingleJob(id: string) {
+async function fetchSingleJob(slugOrId: string) {
+  // Try Firestore first!
   try {
-    const response = await axios.get(`https://bdgovtjob.net/wp-json/wp/v2/posts/${id}?_embed`, {
-      httpsAgent,
-      timeout: 40000,
-      headers: { 'User-Agent': 'Mozilla/5.0' }
-    });
+    const firestoreDb = initializeFirebaseInVercel();
+    if (firestoreDb) {
+      const jobsRef = collection(firestoreDb, 'jobs');
+      const q1 = query(jobsRef, orderBy('publishedDate', 'desc'), limit(500));
+      const snapshot = await getDocs(q1);
+      
+      for (const docSnapshot of snapshot.docs) {
+        const data = docSnapshot.data();
+        if (data.id === slugOrId || data.slug === slugOrId) {
+          delete data._syncToken;
+          return data;
+        }
+      }
+    }
+  } catch (firebaseErr: any) {
+    console.error("Vercel Firestore read error in fetchSingleJob:", firebaseErr.message);
+  }
 
-    const post = response.data;
+  // Backup fallback: Get single job directly from WP API
+  try {
+    const isId = /^\d+$/.test(slugOrId);
+    const endpoint = isId
+      ? `https://bdgovtjob.net/wp-json/wp/v2/posts/${slugOrId}?_embed`
+      : `https://bdgovtjob.net/wp-json/wp/v2/posts?slug=${encodeURIComponent(slugOrId)}&_embed`;
+
+    console.log("Fallback fetching single job from API:", endpoint);
+    const response = await axios.get(endpoint, { timeout: 15000 });
+    const post = isId ? response.data : (Array.isArray(response.data) ? response.data[0] : null);
+
     if (!post || !post.id) return null;
 
     const title = post.title?.rendered || "Job Circular";
@@ -376,7 +541,7 @@ async function fetchSingleJob(id: string) {
       location: 'Bangladesh'
     };
   } catch (e) {
-    console.error(`Fetch single job ${id} failed:`, e);
+    console.error(`Fallback fetch single job ${slugOrId} failed:`, e);
     return null;
   }
 }
