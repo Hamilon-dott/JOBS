@@ -26,6 +26,7 @@ import {
   Globe,
   CreditCard,
   Bookmark,
+  BookOpen,
   Heart,
   Share2,
   LogOut,
@@ -33,7 +34,8 @@ import {
   ExternalLink,
   Loader2,
   CheckCircle2,
-  Sparkles
+  Sparkles,
+  RefreshCw
 } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
 import { clsx, type ClassValue } from 'clsx';
@@ -105,6 +107,28 @@ interface Job {
 const toBengaliNumber = (num: number | string) => {
   const bengaliDigits = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
   return num.toString().replace(/\d/g, (digit) => bengaliDigits[parseInt(digit)]);
+};
+
+const calculateReadingTime = (content?: string): string => {
+  if (!content) return '১ মিনিট';
+  const noHtmlContent = content.replace(/<[^>]*>?/gm, '');
+  const wordCount = noHtmlContent.split(/\s+/).filter(word => word.length > 0).length;
+  let minutes = Math.ceil(wordCount / 150);
+  if (minutes < 1) minutes = 1;
+  return `${toBengaliNumber(minutes)} মিনিট`;
+};
+
+const isNewJob = (publishedDate?: string): boolean => {
+  if (!publishedDate) return false;
+  try {
+    const pubDate = new Date(publishedDate);
+    const now = new Date();
+    const diffTime = now.getTime() - pubDate.getTime();
+    const diffDays = diffTime / (1000 * 60 * 60 * 24);
+    return diffDays >= 0 && diffDays <= 2;
+  } catch {
+    return false;
+  }
 };
 
 const formatRemainingDays = (days: number | null) => {
@@ -332,6 +356,8 @@ export default function App() {
   const [jobSummaries, setJobSummaries] = useState<Record<string, { text: string; loading: boolean; error?: string }>>({});
   const [isFirstVisit, setIsFirstVisit] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'updated' | 'up-to-date'>('idle');
+  const [isSyncingFirebase, setIsSyncingFirebase] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<{ text: string; type: 'success' | 'error' | 'idle' }>({ text: '', type: 'idle' });
 
   const aiRef = React.useRef<GoogleGenAI | null>(null);
   const scrollContainerRef = React.useRef<HTMLDivElement>(null);
@@ -742,6 +768,30 @@ export default function App() {
     return () => clearInterval(intervalId);
   }, []);
 
+  const handleManualSync = async () => {
+    if (isSyncingFirebase) return;
+    setIsSyncingFirebase(true);
+    setSyncMessage({ text: '', type: 'idle' });
+    try {
+      const response = await axios.get('/api/sync-firebase');
+      if (response.data && response.data.success) {
+        setSyncMessage({ text: 'সফলভাবে নতুন বিজ্ঞপ্তি আপডেট হয়েছে!', type: 'success' });
+        // Force-refetch jobs list from Firebase
+        await fetchJobs(true);
+      } else {
+        setSyncMessage({ text: `আপডেট ব্যর্থ হয়েছে: ${response.data.error || 'অজানা ত্রুটি'}`, type: 'error' });
+      }
+    } catch (err: any) {
+      console.error("Error executing manual sync:", err);
+      setSyncMessage({ text: 'সার্ভারের সাথে যোগাযোগ করা যাচ্ছে না।', type: 'error' });
+    } finally {
+      setIsSyncingFirebase(false);
+      setTimeout(() => {
+        setSyncMessage({ text: '', type: 'idle' });
+      }, 5000);
+    }
+  };
+
   const getFallbackJobs = () => {
     const today = new Date().toLocaleDateString();
     return [
@@ -781,7 +831,7 @@ export default function App() {
     ];
   };
 
-  const fetchJobs = async () => {
+  const fetchJobs = async (force: boolean = false) => {
     const CACHE_KEY = 'job_db_cache';
 
     let hasCachedData = false;
@@ -805,14 +855,14 @@ export default function App() {
 
     const lastCheckKey = 'last_job_check_timestamp';
     const now = Date.now();
-    let shouldCheckForUpdates = false;
+    let shouldCheckForUpdates = force;
 
     if (!hasCachedData) {
       setLoading(true);
       setIsFirstVisit(true);
       shouldCheckForUpdates = true;
       localStorage.setItem(lastCheckKey, now.toString());
-    } else {
+    } else if (!force) {
       const lastCheck = localStorage.getItem(lastCheckKey);
       const hoursSinceLastCheck = lastCheck ? (now - parseInt(lastCheck, 10)) / (1000 * 60 * 60) : Infinity;
       
@@ -821,6 +871,9 @@ export default function App() {
         setUpdateStatus('checking');
         localStorage.setItem(lastCheckKey, now.toString());
       }
+    } else {
+      setUpdateStatus('checking');
+      localStorage.setItem(lastCheckKey, now.toString());
     }
     
     if (!shouldCheckForUpdates) {
@@ -1009,13 +1062,47 @@ export default function App() {
     try {
       const d = new Date(dateStr);
       if (isNaN(d.getTime())) return dateStr;
-      const day = toBengaliNumber(d.getDate());
+
+      // Use Intl.DateTimeFormat with Asia/Dhaka timezone to avoid client-side timezone offset discrepancies
+      const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Dhaka',
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric'
+      });
+      
+      const parts = formatter.formatToParts(d);
+      let dayVal = d.getDate();
+      let monthVal = d.getMonth();
+      let yearVal = d.getFullYear();
+      
+      for (const part of parts) {
+        if (part.type === 'day') {
+          dayVal = parseInt(part.value, 10);
+        } else if (part.type === 'month') {
+          monthVal = parseInt(part.value, 10) - 1; // 0-indexed month
+        } else if (part.type === 'year') {
+          yearVal = parseInt(part.value, 10);
+        }
+      }
+
+      const day = toBengaliNumber(dayVal);
       const monthNames = ['জানুয়ারি', 'ফেব্রুয়ারি', 'মার্চ', 'এপ্রিল', 'মে', 'জুন', 'জুলাই', 'আগস্ট', 'সেপ্টেম্বর', 'অক্টোবর', 'নভেম্বর', 'ডিসেম্বর'];
-      const month = monthNames[d.getMonth()];
-      const year = toBengaliNumber(d.getFullYear());
+      const month = monthNames[monthVal];
+      const year = toBengaliNumber(yearVal);
       return `${day} ${month} ${year}`;
     } catch {
-      return dateStr;
+      try {
+        const d = new Date(dateStr);
+        if (isNaN(d.getTime())) return dateStr;
+        const day = toBengaliNumber(d.getDate());
+        const monthNames = ['জানুয়ারি', 'ফেব্রুয়ারি', 'মার্চ', 'এপ্রিল', 'মে', 'জুন', 'জুলাই', 'আগস্ট', 'সেপ্টেম্বর', 'অক্টোবর', 'নভেম্বর', 'ডিসেম্বর'];
+        const month = monthNames[d.getMonth()];
+        const year = toBengaliNumber(d.getFullYear());
+        return `${day} ${month} ${year}`;
+      } catch {
+        return dateStr;
+      }
     }
   };
 
@@ -1117,91 +1204,129 @@ export default function App() {
             initial={{ width: 0, opacity: 0 }}
             animate={{ width: 260, opacity: 1 }}
             exit={{ width: 0, opacity: 0 }}
-            className="bg-[#0f172a] text-[#f8fafc] overflow-hidden flex flex-col shrink-0 border-r border-white/5"
+            className="bg-[#0f172a] text-[#f8fafc] overflow-hidden flex flex-col shrink-0 border-r border-white/5 h-full"
           >
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-10 selection:bg-none">
-                <div className="flex items-center gap-3">
-                  <div className="bg-[#3b82f6] w-10 h-10 rounded-lg flex items-center justify-center text-white shrink-0">
-                    <Briefcase size={20} />
+            <div className="p-6 flex flex-col justify-between h-full bg-[#0f172a] overflow-y-auto custom-scrollbar">
+              <div className="flex-1 flex flex-col">
+                <div className="flex items-center justify-between mb-10 selection:bg-none">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-[#3b82f6] w-10 h-10 rounded-lg flex items-center justify-center text-white shrink-0">
+                      <Briefcase size={20} />
+                    </div>
+                    <span className="text-white font-black tracking-wider text-xl">JOBS</span>
                   </div>
-                  <span className="text-white font-black tracking-wider text-xl">JOBS</span>
+                  <button 
+                    onClick={() => setIsSidebarOpen(false)}
+                    className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+                  >
+                    <ArrowRight size={22} />
+                  </button>
                 </div>
-                <button 
-                  onClick={() => setIsSidebarOpen(false)}
-                  className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
-                >
-                  <ArrowRight size={22} />
-                </button>
+
+                <nav className="space-y-1">
+                  {categories.map((cat) => (
+                    <div
+                      key={cat}
+                      onClick={() => handleFilterClick(cat)}
+                      className={cn(
+                        "nav-item px-4 py-3 rounded-lg flex items-center gap-3 text-sm font-medium cursor-pointer transition-all duration-200 whitespace-nowrap",
+                        activeFilter === cat
+                          ? "bg-[#1e293b] text-[#3b82f6]"
+                          : "text-[#94a3b8] hover:bg-white/5 hover:text-[#f8fafc]"
+                      )}
+                    >
+                      {cat === 'All' && <LayoutDashboard size={18} />}
+                      {cat === 'Expiring Soon' && <Clock size={18} />}
+                      {cat === 'Bank' && <CreditCard size={18} />}
+                      {cat === 'Government' && <ShieldCheck size={18} />}
+                      {cat === 'NGO' && <Users size={18} />}
+                      {cat === 'Private' && <Briefcase size={18} />}
+                      {cat === 'General' && <Globe size={18} />}
+                      {cat}
+                    </div>
+                  ))}
+                  
+                  <div className="pt-6 pb-2">
+                    <h3 className="px-4 text-[11px] font-bold text-[#475569] uppercase tracking-widest mb-2 whitespace-nowrap">My Desk</h3>
+                    <div 
+                      onClick={() => handleFilterClick('Favourite List')}
+                      className={cn(
+                        "nav-item px-4 py-3 rounded-lg flex items-center gap-3 text-sm font-medium cursor-pointer transition-all duration-200 whitespace-nowrap",
+                        activeFilter === 'Favourite List'
+                          ? "bg-[#1e293b] text-[#3b82f6]"
+                          : "text-[#94a3b8] hover:bg-white/5 hover:text-[#f8fafc]"
+                      )}
+                    >
+                      <Heart size={18} fill={activeFilter === 'Favourite List' ? "#3b82f6" : "none"} />
+                      Favourite List
+                    </div>
+                    
+                    <a 
+                      href="https://www.talukdaracademy.com.bd/p/birth-date-calculate-your-age-year-here.html"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="nav-item px-4 py-3 rounded-lg flex items-center gap-3 text-sm font-medium cursor-pointer transition-all duration-200 whitespace-nowrap text-[#94a3b8] hover:bg-white/5 hover:text-[#f8fafc]"
+                    >
+                      <Calculator size={18} />
+                      Age Calculator
+                    </a>
+
+                    <div 
+                      onClick={() => setShowExitConfirm(true)}
+                      className="nav-item px-4 py-3 rounded-lg flex items-center gap-3 text-sm font-bold cursor-pointer transition-all duration-200 whitespace-nowrap text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 mt-4 border border-rose-500/10"
+                    >
+                      <LogOut size={18} />
+                      Exit App
+                    </div>
+                  </div>
+                </nav>
               </div>
 
-              <nav className="space-y-1">
-                {categories.map((cat) => (
-                  <div
-                    key={cat}
-                    onClick={() => handleFilterClick(cat)}
+              <div className="pt-6 border-t border-white/5 flex flex-col gap-4">
+                <div className="flex flex-col gap-1.5">
+                  <button
+                    onClick={handleManualSync}
+                    disabled={isSyncingFirebase}
                     className={cn(
-                      "nav-item px-4 py-3 rounded-lg flex items-center gap-3 text-sm font-medium cursor-pointer transition-all duration-200 whitespace-nowrap",
-                      activeFilter === cat
-                        ? "bg-[#1e293b] text-[#3b82f6]"
-                        : "text-[#94a3b8] hover:bg-white/5 hover:text-[#f8fafc]"
+                      "w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-xs font-bold transition-all duration-200 shadow-md",
+                      isSyncingFirebase 
+                        ? "bg-slate-800 text-[#94a3b8] cursor-not-allowed border border-slate-700"
+                        : "bg-[#1e293b] hover:bg-white/5 text-slate-300 hover:text-white active:scale-95 border border-white/10"
                     )}
                   >
-                    {cat === 'All' && <LayoutDashboard size={18} />}
-                    {cat === 'Expiring Soon' && <Clock size={18} />}
-                    {cat === 'Bank' && <CreditCard size={18} />}
-                    {cat === 'Government' && <ShieldCheck size={18} />}
-                    {cat === 'NGO' && <Users size={18} />}
-                    {cat === 'Private' && <Briefcase size={18} />}
-                    {cat === 'General' && <Globe size={18} />}
-                    {cat}
-                  </div>
-                ))}
-                
-                <div className="pt-6 pb-2">
-                  <h3 className="px-4 text-[11px] font-bold text-[#475569] uppercase tracking-widest mb-2 whitespace-nowrap">My Desk</h3>
-                  <div 
-                    onClick={() => handleFilterClick('Favourite List')}
-                    className={cn(
-                      "nav-item px-4 py-3 rounded-lg flex items-center gap-3 text-sm font-medium cursor-pointer transition-all duration-200 whitespace-nowrap",
-                      activeFilter === 'Favourite List'
-                        ? "bg-[#1e293b] text-[#3b82f6]"
-                        : "text-[#94a3b8] hover:bg-white/5 hover:text-[#f8fafc]"
-                    )}
-                  >
-                    <Heart size={18} fill={activeFilter === 'Favourite List' ? "#3b82f6" : "none"} />
-                    Favourite List
-                  </div>
+                    <RefreshCw size={14} className={cn(isSyncingFirebase && "animate-spin")} />
+                    {isSyncingFirebase ? "আপডেট হচ্ছে..." : "নতুন সার্কুলার রিফ্রেশ"}
+                  </button>
                   
-                  <a 
-                    href="https://www.talukdaracademy.com.bd/p/birth-date-calculate-your-age-year-here.html"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="nav-item px-4 py-3 rounded-lg flex items-center gap-3 text-sm font-medium cursor-pointer transition-all duration-200 whitespace-nowrap text-[#94a3b8] hover:bg-white/5 hover:text-[#f8fafc]"
-                  >
-                    <Calculator size={18} />
-                    Age Calculator
-                  </a>
-
-                  <div 
-                    onClick={() => setShowExitConfirm(true)}
-                    className="nav-item px-4 py-3 rounded-lg flex items-center gap-3 text-sm font-bold cursor-pointer transition-all duration-200 whitespace-nowrap text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 mt-4 border border-rose-500/10"
-                  >
-                    <LogOut size={18} />
-                    Exit App
-                  </div>
+                  <AnimatePresence mode="wait">
+                    {syncMessage.text && (
+                      <motion.p
+                        initial={{ opacity: 0, y: 5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -5 }}
+                        className={cn(
+                          "text-[10px] font-semibold text-center px-1 leading-normal whitespace-pre-wrap",
+                          syncMessage.type === 'success' && "text-emerald-400",
+                          syncMessage.type === 'error' && "text-rose-400",
+                          syncMessage.type === 'idle' && "text-slate-400"
+                        )}
+                      >
+                        {syncMessage.text}
+                      </motion.p>
+                    )}
+                  </AnimatePresence>
                 </div>
-              </nav>
 
-              <div className="mt-auto pt-6 border-t border-white/5 text-[11px] text-[#475569] leading-relaxed whitespace-nowrap">
-                <a 
-                  href="https://youtube.com/@talukdaracademy" 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="hover:text-[#3b82f6] transition-colors"
-                >
-                  Powered by Talukdar Academy
-                </a>
+                <div className="text-[11px] text-[#475569] leading-relaxed whitespace-nowrap text-center">
+                  <a 
+                    href="https://youtube.com/@talukdaracademy" 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="hover:text-[#3b82f6] transition-colors"
+                  >
+                    Powered by Talukdar Academy
+                  </a>
+                </div>
               </div>
             </div>
           </motion.aside>
@@ -1476,9 +1601,14 @@ export default function App() {
                             )}
                           </div>
                           <div className="min-w-0 flex-1">
-                            <h4 className="font-bold text-[15px] md:text-[17px] text-[#0f172a] mb-1 group-hover:text-[#3b82f6] transition-colors line-clamp-2 md:line-clamp-1 leading-snug">
-                              {job.title}
-                            </h4>
+                            <div className="flex items-start gap-2 mb-1">
+                              <h4 className="font-bold text-[15px] md:text-[17px] text-[#0f172a] group-hover:text-[#3b82f6] transition-colors line-clamp-2 md:line-clamp-1 leading-snug">
+                                {job.title}
+                              </h4>
+                              {isNewJob(job.publishedDate) && (
+                                <span className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider shrink-0 mt-0.5 md:mt-0 shadow-sm animate-pulse">New</span>
+                              )}
+                            </div>
                             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] md:text-[13px] text-[#64748b]">
                               <span className="font-bold text-[#334155]">{job.organization}</span>
                               <span className="flex items-center gap-1 bg-slate-50 px-1.5 py-0.5 rounded">
@@ -1793,11 +1923,24 @@ export default function App() {
                             ))}
                           </div>
                           <h1 className="text-2xl md:text-3xl font-bold text-[#0f172a] mb-4 leading-tight">{selectedJob.title}</h1>
-                          <div className="flex items-center gap-3 bg-slate-50 border border-slate-100 px-4 py-3 rounded-xl inline-flex w-full md:w-auto">
-                            {selectedJob.source.includes('Government') && (
-                              <img src={BD_GOVT_LOGO} alt="Govt Logo" width={32} height={32} className="w-8 h-8 object-contain shrink-0" referrerPolicy="no-referrer" loading="lazy" />
-                            )}
-                            <p className="text-lg text-[#3b82f6] font-semibold">{selectedJob.organization}</p>
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-4 mb-2">
+                            <div className="flex items-center gap-3 bg-slate-50 border border-slate-100 px-4 py-3 rounded-xl inline-flex w-full sm:w-auto">
+                              {selectedJob.source.includes('Government') && (
+                                <img src={BD_GOVT_LOGO} alt="Govt Logo" width={32} height={32} className="w-8 h-8 object-contain shrink-0" referrerPolicy="no-referrer" loading="lazy" />
+                              )}
+                              <p className="text-lg text-[#3b82f6] font-semibold">{selectedJob.organization}</p>
+                            </div>
+                            <div className="flex items-center gap-4 text-sm text-slate-500 bg-white border border-slate-200 px-4 py-3 rounded-xl inline-flex w-full sm:w-auto shadow-sm">
+                              <span className="flex items-center gap-1.5 font-medium">
+                                <Calendar size={16} className="text-slate-400" />
+                                <span className="hidden sm:inline">প্রকাশিত:</span> {formatDate(selectedJob.publishedDate)}
+                              </span>
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-300"></span>
+                              <span className="flex items-center gap-1.5 font-medium">
+                                <BookOpen size={16} className="text-slate-400" />
+                                {calculateReadingTime(selectedJob.content)} পড়া
+                              </span>
+                            </div>
                           </div>
                         </div>
 
@@ -2144,7 +2287,7 @@ export default function App() {
           will-change: auto !important;
         }
       `}</style>
-      <ScrollButtons />
+      <ScrollButtons containerRef={scrollContainerRef} />
     </div>
   );
 }

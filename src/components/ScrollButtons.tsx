@@ -1,13 +1,26 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { ArrowUp, ArrowDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-export default function ScrollButtons() {
+interface ScrollButtonsProps {
+  containerRef?: React.RefObject<HTMLDivElement | null>;
+}
+
+export default function ScrollButtons({ containerRef }: ScrollButtonsProps) {
   const [showTop, setShowTop] = useState(false);
   const [showBottom, setShowBottom] = useState(true);
 
-  const checkScroll = () => {
-    const container = document.querySelector('.custom-scrollbar');
+  const getContainer = useCallback(() => {
+    const containers = document.querySelectorAll('.custom-scrollbar');
+    if (containers.length > 1) {
+      return containers[containers.length - 1] as HTMLDivElement;
+    }
+    if (containerRef && containerRef.current) return containerRef.current;
+    return document.querySelector('.custom-scrollbar') as HTMLDivElement | null;
+  }, [containerRef]);
+
+  const checkScroll = useCallback(() => {
+    const container = getContainer();
     if (!container) return;
 
     if (container.scrollTop > 300) {
@@ -21,43 +34,42 @@ export default function ScrollButtons() {
     } else {
       setShowBottom(true);
     }
-  };
+  }, [getContainer]);
 
   useEffect(() => {
-    const container = document.querySelector('.custom-scrollbar');
-    if (container) {
-      container.addEventListener('scroll', checkScroll);
-      checkScroll(); // initial check
-    }
+    // Check initially
+    checkScroll();
 
-    // Since the container might not exist immediately or change, we might want to poll or use observer, 
-    // but a short timeout helps ensure it mounts first.
-    const timeout = setTimeout(() => {
-      const laterContainer = document.querySelector('.custom-scrollbar');
-      if (laterContainer) {
-        laterContainer.addEventListener('scroll', checkScroll);
+    // Use a capture-phase listener to catch ALL scroll events from any element
+    const handleScroll = (e: Event) => {
+      const target = e.target as HTMLElement;
+      if (target && target.classList && target.classList.contains('custom-scrollbar')) {
         checkScroll();
       }
+    };
+
+    window.addEventListener('scroll', handleScroll, true);
+
+    // To catch size changes when Job Details open/close or images load
+    const interval = setInterval(() => {
+      checkScroll();
     }, 1000);
 
     return () => {
-      clearTimeout(timeout);
-      const containerToCleanup = document.querySelector('.custom-scrollbar');
-      if (containerToCleanup) {
-        containerToCleanup.removeEventListener('scroll', checkScroll);
-      }
+      window.removeEventListener('scroll', handleScroll, true);
+      clearInterval(interval);
     };
-  }, []);
+  }, [checkScroll]);
 
   const scrollToTop = () => {
-    const container = document.querySelector('.custom-scrollbar');
+    const container = getContainer();
     if (container) {
       container.scrollTo({ top: 0, behavior: 'smooth' });
     }
   };
 
   const scrollToBottom = () => {
-    const container = document.querySelector('.custom-scrollbar');
+    const container = getContainer();
     if (container) {
       container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
     }
@@ -69,13 +81,13 @@ export default function ScrollButtons() {
     exit: { scale: 0, opacity: 0 },
     tap: {
       scale: 0.8,
-      boxShadow: "0 0 0 20px rgba(59, 130, 246, 0)", // Ripple/splash color effect
+      boxShadow: "0 0 0 20px rgba(59, 130, 246, 0)",
       transition: { duration: 0.4 }
     }
   };
 
   return (
-    <div className="fixed bottom-8 right-8 flex flex-col gap-4 z-50">
+    <div className="fixed bottom-6 right-6 md:bottom-8 md:right-8 flex flex-col gap-3 md:gap-4 z-[2000] pointer-events-none">
       <AnimatePresence>
         {showTop && (
           <motion.button
@@ -87,10 +99,10 @@ export default function ScrollButtons() {
             whileTap="tap"
             onClick={scrollToTop}
             style={{ originX: 0.5, originY: 0.5 }}
-            className="p-3 bg-blue-600 text-white rounded-full shadow-xl hover:bg-blue-700 hover:shadow-2xl focus:outline-none flex items-center justify-center transition-colors"
+            className="p-3 md:p-3.5 bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 hover:shadow-2xl focus:outline-none flex items-center justify-center transition-all duration-300 pointer-events-auto border border-blue-500/20"
             title="উপরে যান"
           >
-            <ArrowUp size={24} />
+            <ArrowUp size={22} className="md:w-6 md:h-6" />
           </motion.button>
         )}
       </AnimatePresence>
@@ -105,13 +117,14 @@ export default function ScrollButtons() {
             whileTap="tap"
             onClick={scrollToBottom}
             style={{ originX: 0.5, originY: 0.5 }}
-            className="p-3 bg-[#057a41] text-white rounded-full shadow-xl hover:bg-[#046335] hover:shadow-2xl focus:outline-none flex items-center justify-center transition-colors"
+            className="p-3 md:p-3.5 bg-[#057a41] text-white rounded-full shadow-lg hover:bg-[#046335] hover:shadow-2xl focus:outline-none flex items-center justify-center transition-all duration-300 pointer-events-auto border border-[#057a41]/20"
             title="নিচে যান"
           >
-            <ArrowDown size={24} />
+            <ArrowDown size={22} className="md:w-6 md:h-6" />
           </motion.button>
         )}
       </AnimatePresence>
     </div>
   );
 }
+

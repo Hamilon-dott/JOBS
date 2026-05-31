@@ -8,7 +8,7 @@ import fs from 'fs';
 
 // Initialize Firebase
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, getDocs, doc, setDoc, query, orderBy, limit, getDoc } from 'firebase/firestore';
+import { getFirestore, collection, getDocs, doc, setDoc, query, orderBy, limit, getDoc, deleteDoc } from 'firebase/firestore';
 
 const firebaseConfig = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf-8'));
 const firebaseApp = initializeApp(firebaseConfig);
@@ -463,6 +463,101 @@ const parseDeadline = (deadlineStr: string): Date | null => {
   return isNaN(date.getTime()) ? null : date;
 };
 
+// Helper to parse complex/simple Bengali or English dates
+const parseBengaliDate = (dateStr: string): Date | null => {
+  if (!dateStr) return null;
+  
+  // Convert Bengali numerals to English
+  const bengaliToEnglish = (str: string) => {
+    const numerals: { [key: string]: string } = {
+      '০': '0', '১': '1', '২': '2', '৩': '3', '৪': '4', '৫': '5', '৬': '6', '৭': '7', '৮': '8', '৯': '9'
+    };
+    return str.replace(/[০-৯]/g, d => numerals[d]);
+  };
+
+  // 1. Clean the string
+  let cleanStr = dateStr.replace(/[।\.]/g, '').replace(/\s+/g, ' ').trim();
+  
+  // 2. If it contains multiple dates separated by comma, "ও", "এবং", we want the last one because the last one usually contains the full month and year.
+  // E.g. "২২ এপ্রিল, ১১, ১৩ ও ২১ মে ২০২৬" -> "২১ মে ২০২৬"
+  // E.g. "১৪ ও ১৯ মে ২০২৬" -> "১৯ মে ২০২৬"
+  const parts = cleanStr.split(/[,&|\sওএবং]+/);
+  
+  const monthsList = [
+    'জানুয়ারি', 'জানুয়ারী', 'ফেব্রুয়ারি', 'ফেব্রুয়ারী', 'মার্চ', 'এপ্রিল', 
+    'মে', 'জুন', 'জুলাই', 'আগস্ট', 'আগষ্ট', 'সেপ্টেম্বর', 'সেপ্টেম্বার', 
+    'অক্টোবর', 'অক্টোবার', 'নভেম্বর', 'নভেম্বার', 'ডিসেম্বর', 'ডিসেম্বার',
+    'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'
+  ];
+
+  const monthsMap: { [key: string]: string } = {
+    'জানুয়ারি': 'January', 'জানুয়ারী': 'January',
+    'ফেব্রুয়ারি': 'February', 'ফেব্রুয়ারী': 'February',
+    'মার্চ': 'March',
+    'এপ্রিল': 'April',
+    'মে': 'May',
+    'জুন': 'June',
+    'জুলাই': 'July',
+    'আগস্ট': 'August', 'আগষ্ট': 'August',
+    'সেপ্টেম্বর': 'September', 'সেপ্টেম্বার': 'September',
+    'অক্টোবর': 'October', 'অক্টোবার': 'October',
+    'নভেম্বর': 'November', 'নভেম্বার': 'November',
+    'ডিসেম্বর': 'December', 'ডিসেম্বার': 'December'
+  };
+
+  let year: string | null = null;
+  let month: string | null = null;
+  let day: string | null = null;
+
+  // Search from right to left to grab the latest fully formed date
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const part = parts[i].trim();
+    const cleanPart = bengaliToEnglish(part);
+    
+    if (!year && /^\d{4}$/.test(cleanPart)) {
+      year = cleanPart;
+      continue;
+    }
+    
+    const lowerPart = part.toLowerCase();
+    const matchedMonthKey = monthsList.find(m => lowerPart.includes(m));
+    if (!month && matchedMonthKey) {
+      month = monthsMap[matchedMonthKey] || matchedMonthKey;
+      continue;
+    }
+    
+    if (!day && /^\d{1,2}$/.test(cleanPart)) {
+      day = cleanPart;
+      continue;
+    }
+  }
+
+  if (!year || !month || !day) {
+    const englishCleanStr = bengaliToEnglish(cleanStr);
+    const regex = /(\d{1,2})\s+([^\s\d,]+)\s+(\d{4})/;
+    const match = englishCleanStr.match(regex);
+    if (match) {
+      day = match[1];
+      const mText = match[2].toLowerCase();
+      const matchedMonthKey = monthsList.find(m => mText.includes(m));
+      if (matchedMonthKey) {
+        month = monthsMap[matchedMonthKey] || matchedMonthKey;
+      }
+      year = match[3];
+    }
+  }
+
+  if (year && month && day) {
+    const dateFormattedStr = `${day} ${month} ${year}`;
+    const date = new Date(dateFormattedStr);
+    if (!isNaN(date.getTime())) {
+      return date;
+    }
+  }
+
+  return null;
+};
+
 // Function to process a WordPress post into a Job object
 function processWpPost(post: any, sourceName: string, thirtyDaysAgo: Date, today: Date, parseDeadline: Function) {
   const title = post.title?.rendered || "Job Circular";
@@ -504,8 +599,22 @@ function processWpPost(post: any, sourceName: string, thirtyDaysAgo: Date, today
     return null; 
   }
 
+  // Extract custom publication date from post content when available, with fallback to post create date
+  let customPubDate: Date | null = null;
+  const pubDateText = extractFromTableOrText(['বিজ্ঞপ্তি প্রকাশের তারিখ', 'প্রকাশের তারিখ', 'বিজ্ঞপ্তি প্রকাশ', 'Publish Date', 'Published Date']);
+  if (pubDateText) {
+    const parsedCustom = parseBengaliDate(pubDateText);
+    if (parsedCustom && !isNaN(parsedCustom.getTime())) {
+      const yr = parsedCustom.getFullYear();
+      if (yr >= 2020 && yr <= 2035) {
+        customPubDate = parsedCustom;
+      }
+    }
+  }
+
   // Fallback: Skip very old posts (published > 90 days ago) if deadline is unknown
-  const pubDate = new Date(post.date);
+  const postPubDate = new Date(post.date_gmt && post.date_gmt !== '0001-11-30T00:00:00' ? `${post.date_gmt}Z` : post.date);
+  const pubDate = customPubDate || postPubDate;
   const ninetyDaysAgo = new Date();
   ninetyDaysAgo.setDate(today.getDate() - 90);
   if (pubDate < ninetyDaysAgo && (!deadlineDate || deadlineDate < today)) {
@@ -629,8 +738,8 @@ async function fetchJobsFromWP(isFull: boolean = false) {
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(today.getDate() - 30);
   
-  const targetCount = isFull ? 350 : 40;
-  const maxSearchPages = isFull ? 8 : 2; // Increase page limit to account for filtered items
+  const targetCount = isFull ? 500 : 40;
+  const maxSearchPages = isFull ? 10 : 2; // Increase page limit to account for filtered items
 
   for (const source of sources) {
     try {
@@ -746,16 +855,47 @@ async function fetchJobsFromWP(isFull: boolean = false) {
   return fallbackResult;
 }
 
+async function cleanupExpiredJobsFromFirebase() {
+  console.log("Checking for expired jobs (deadline passed by more than 3 months) to delete...");
+  try {
+    const jobsRef = collection(db, 'jobs');
+    const snapshot = await getDocs(jobsRef);
+    const cutoffDate = new Date();
+    cutoffDate.setMonth(cutoffDate.getMonth() - 3); // 3 months ago
+
+    let deletedCount = 0;
+    for (const jobDoc of snapshot.docs) {
+      const data = jobDoc.data();
+      if (data && data.deadlineISO) {
+        const deadlineDate = new Date(data.deadlineISO);
+        if (!isNaN(deadlineDate.getTime()) && deadlineDate < cutoffDate) {
+          console.log(`Auto deleting expired job "${data.title}" (deadline was ${data.deadline}, parsed: ${data.deadlineISO})`);
+          await deleteDoc(doc(db, 'jobs', jobDoc.id));
+          deletedCount++;
+        }
+      }
+    }
+    if (deletedCount > 0) {
+      console.log(`Cleaned up ${deletedCount} expired jobs from Firebase.`);
+    }
+  } catch (error: any) {
+    console.error("Error cleaning up expired jobs from Firebase:", error.message);
+  }
+}
+
 let isSyncing = false;
 async function syncJobsToFirebase() {
   if (isSyncing) return { message: "Already syncing" };
   isSyncing = true;
   console.log("Starting background sync to Firebase...");
   try {
+    // First run the 3-month expiration cleanup
+    await cleanupExpiredJobsFromFirebase();
+
     const jobs = await fetchJobsFromWP(true); // get full jobs
     let count = 0;
     for (const job of jobs) {
-      if (count > 200) break; // Don't overwhelm Firebase initially
+      if (count >= 500) break; // Store up to 500 to guarantee "at least 350"
       const jobRef = doc(db, 'jobs', job.id);
       await setDoc(jobRef, {
         ...job,
@@ -776,7 +916,7 @@ async function syncJobsToFirebase() {
 async function fetchLatestJobs(isFull: boolean = false) {
   try {
     const jobsRef = collection(db, 'jobs');
-    const limitCount = isFull ? 300 : 40;
+    const limitCount = isFull ? 500 : 40;
     const q = query(jobsRef, orderBy('publishedDate', 'desc'), limit(limitCount));
     const snapshot = await getDocs(q);
     
@@ -801,7 +941,7 @@ async function fetchLatestJobs(isFull: boolean = false) {
 async function fetchSingleJob(slugOrId: string) {
   try {
     const jobsRef = collection(db, 'jobs');
-    const q1 = query(jobsRef, orderBy('publishedDate', 'desc'), limit(300));
+    const q1 = query(jobsRef, orderBy('publishedDate', 'desc'), limit(500));
     const snapshot = await getDocs(q1);
     
     // Manual find because we don't have custom indexes for slug on Firebase right now
