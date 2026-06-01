@@ -1550,41 +1550,7 @@ export default function App() {
                 </nav>
               </div>
 
-              <div className="pt-6 border-t border-white/5 flex flex-col gap-4">
-                <div className="flex flex-col gap-1.5">
-                  <button
-                    onClick={() => handleManualSync()}
-                    disabled={isSyncingFirebase}
-                    className={cn(
-                      "w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-xs font-bold transition-all duration-200 shadow-md",
-                      isSyncingFirebase 
-                        ? "bg-slate-800 text-[#94a3b8] cursor-not-allowed border border-slate-700"
-                        : "bg-[#1e293b] hover:bg-white/5 text-slate-300 hover:text-white active:scale-95 border border-white/10"
-                    )}
-                  >
-                    <RefreshCw size={14} className={cn(isSyncingFirebase && "animate-spin")} />
-                    {isSyncingFirebase ? "আপডেট হচ্ছে..." : "নতুন সার্কুলার রিফ্রেশ"}
-                  </button>
-                  
-                  <AnimatePresence mode="wait">
-                    {syncMessage.text && (
-                      <motion.p
-                        initial={{ opacity: 0, y: 5 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -5 }}
-                        className={cn(
-                          "text-[10px] font-semibold text-center px-1 leading-normal whitespace-pre-wrap",
-                          syncMessage.type === 'success' && "text-emerald-400",
-                          syncMessage.type === 'error' && "text-rose-400",
-                          syncMessage.type === 'idle' && "text-slate-400"
-                        )}
-                      >
-                        {syncMessage.text}
-                      </motion.p>
-                    )}
-                  </AnimatePresence>
-                </div>
-
+              <div className="pt-6 border-t border-white/5 flex flex-col">
                 <div className="text-[11px] text-[#475569] leading-relaxed whitespace-nowrap text-center">
                   <a 
                     href="https://youtube.com/@talukdaracademy" 
