@@ -1465,6 +1465,7 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+
       {/* Sidebar */}
       <AnimatePresence mode="wait">
         {isSidebarOpen && (
@@ -1492,30 +1493,41 @@ export default function App() {
                 </div>
 
                 <nav className="space-y-1">
-                  {categories.map((cat) => (
-                    <div
-                      key={cat}
-                      onClick={() => handleFilterClick(cat)}
-                      className={cn(
-                        "nav-item px-4 py-3 rounded-lg flex items-center gap-3 text-sm font-medium cursor-pointer transition-all duration-200 whitespace-nowrap",
-                        activeFilter === cat
-                          ? "bg-[#1e293b] text-[#3b82f6]"
-                          : "text-[#94a3b8] hover:bg-white/5 hover:text-[#f8fafc]"
-                      )}
-                    >
-                      {cat === 'All' && <LayoutDashboard size={18} />}
-                      {cat === 'Expiring Soon' && <Clock size={18} />}
-                      {cat === 'Bank' && <CreditCard size={18} />}
-                      {cat === 'Government' && <ShieldCheck size={18} />}
-                      {cat === 'NGO' && <Users size={18} />}
-                      {cat === 'Private' && <Briefcase size={18} />}
-                      {cat === 'General' && <Globe size={18} />}
-                      {cat}
-                    </div>
-                  ))}
+                  {categories.map((cat) => {
+                    const categoryTranslations: { [key: string]: string } = {
+                      'All': 'সকল সার্কুলার',
+                      'Expiring Soon': 'মেয়াদ শেষ হচ্ছে',
+                      'Government': 'সরকারি চাকরি',
+                      'Private': 'বেসরকারি চাকরি',
+                      'Bank': 'ব্যাংক জব',
+                      'NGO': 'এনজিও চাকরি',
+                      'General': 'অন্যান্য চাকরি'
+                    };
+                    return (
+                      <div
+                        key={cat}
+                        onClick={() => handleFilterClick(cat)}
+                        className={cn(
+                          "nav-item px-4 py-3 rounded-lg flex items-center gap-3 text-sm font-medium cursor-pointer transition-all duration-200 whitespace-nowrap",
+                          activeFilter === cat
+                            ? "bg-[#1e293b] text-[#3b82f6]"
+                            : "text-[#94a3b8] hover:bg-white/5 hover:text-[#f8fafc]"
+                        )}
+                      >
+                        {cat === 'All' && <LayoutDashboard size={18} />}
+                        {cat === 'Expiring Soon' && <Clock size={18} />}
+                        {cat === 'Bank' && <CreditCard size={18} />}
+                        {cat === 'Government' && <ShieldCheck size={18} />}
+                        {cat === 'NGO' && <Users size={18} />}
+                        {cat === 'Private' && <Briefcase size={18} />}
+                        {cat === 'General' && <Globe size={18} />}
+                        {categoryTranslations[cat] || cat}
+                      </div>
+                    );
+                  })}
                   
                   <div className="pt-6 pb-2">
-                    <h3 className="px-4 text-[11px] font-bold text-[#475569] uppercase tracking-widest mb-2 whitespace-nowrap">My Desk</h3>
+                    <h3 className="px-4 text-[11px] font-bold text-[#475569] uppercase tracking-widest mb-2 whitespace-nowrap">আমার ডেস্ক</h3>
                     <div 
                       onClick={() => handleFilterClick('Favourite List')}
                       className={cn(
@@ -1526,7 +1538,7 @@ export default function App() {
                       )}
                     >
                       <Heart size={18} fill={activeFilter === 'Favourite List' ? "#3b82f6" : "none"} />
-                      Favourite List
+                      পছন্দের তালিকা
                     </div>
                     
                     <a 
@@ -1536,15 +1548,15 @@ export default function App() {
                       className="nav-item px-4 py-3 rounded-lg flex items-center gap-3 text-sm font-medium cursor-pointer transition-all duration-200 whitespace-nowrap text-[#94a3b8] hover:bg-white/5 hover:text-[#f8fafc]"
                     >
                       <Calculator size={18} />
-                      Age Calculator
+                      বয়স ক্যালকুলেটর
                     </a>
-
+ 
                     <div 
                       onClick={() => setShowExitConfirm(true)}
                       className="nav-item px-4 py-3 rounded-lg flex items-center gap-3 text-sm font-bold cursor-pointer transition-all duration-200 whitespace-nowrap text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 mt-4 border border-rose-500/10"
                     >
                       <LogOut size={18} />
-                      Exit App
+                      অ্যাপ বন্ধ করুন
                     </div>
                   </div>
                 </nav>
@@ -1566,6 +1578,7 @@ export default function App() {
           </motion.aside>
         )}
       </AnimatePresence>
+
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col overflow-hidden">
