@@ -8,7 +8,7 @@ import fs from 'fs';
 
 // Initialize Firebase
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, getDocs, doc, setDoc, query, orderBy, limit, getDoc, deleteDoc, writeBatch } from 'firebase/firestore';
+import { getFirestore, collection, getDocs, doc, setDoc, query, orderBy, limit, getDoc, deleteDoc, writeBatch, setLogLevel } from 'firebase/firestore';
 
 let firebaseConfig: any;
 let firestoreDatabaseId: string | undefined;
@@ -45,6 +45,7 @@ if (process.env.FIREBASE_API_KEY) {
 
 const firebaseApp = initializeApp(firebaseConfig);
 const db = getFirestore(firebaseApp, firestoreDatabaseId);
+setLogLevel('error'); // Suppress benign GrpcConnection idle stream warnings
 
 // Slug generation function
 function generateSlug(title: string, orgName?: string | null, fallbackId?: string, wpSlug?: string | null): string {
@@ -994,6 +995,10 @@ async function syncJobsToFirebase(isQuick: boolean = false, isFull: boolean = fa
     console.log(`Synced ${syncedCount} jobs to Firebase successfully using writeBatch.`);
     return { success: true, count: syncedCount };
   } catch (error) {
+    if (error && (error as Error).message && (error as Error).message.includes("Quota limit exceeded")) {
+      console.warn("Firebase Quota limit exceeded. Skipping sync until quota resets.");
+      return { success: false, error: "Quota limit exceeded" };
+    }
     console.error("Error syncing to Firebase:", error);
     return { success: false, error: (error as Error).message };
   } finally {
@@ -1021,7 +1026,11 @@ async function fetchLatestJobs(isFull: boolean = false) {
     });
     return jobs;
   } catch (e: any) {
-    console.error("Firebase read error in fetchLatestJobs:", e.message);
+    if (e.message && e.message.includes("Quota limit exceeded")) {
+      console.warn("Firebase Quota limit exceeded in fetchLatestJobs. Falling back to WP API.");
+    } else {
+      console.error("Firebase read error in fetchLatestJobs:", e.message);
+    }
     return fetchJobsFromWP(isFull);
   }
 }
@@ -1041,7 +1050,11 @@ async function fetchSingleJob(slugOrId: string) {
       }
     }
   } catch (e: any) {
-    console.error("Firebase read error in fetchSingleJob:", e.message);
+    if (e.message && e.message.includes("Quota limit exceeded")) {
+      console.warn("Firebase Quota limit exceeded in fetchSingleJob. Falling back to cache/WP API.");
+    } else {
+      console.error("Firebase read error in fetchSingleJob:", e.message);
+    }
   }
 
   // Check cache first
