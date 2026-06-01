@@ -198,7 +198,8 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
   app.get('/api/sync-firebase', async (req, res) => {
     try {
       const isQuick = req.query.quick === 'true' || req.query.q === '1';
-      const result = await syncJobsToFirebase(isQuick);
+      const isFull = req.query.full === 'true';
+      const result = await syncJobsToFirebase(isQuick, isFull);
       res.json(result);
     } catch (error) {
       console.error('Error syncing:', error);
@@ -206,11 +207,11 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
     }
   });
 
-  // Schedule background sync every 6 hours
+  // Schedule background sync every 24 hours
   setInterval(() => {
-    console.log("Running scheduled 6-hour sync to Firebase...");
-    syncJobsToFirebase();
-  }, 6 * 60 * 60 * 1000);
+    console.log("Running scheduled 24-hour sync to Firebase...");
+    syncJobsToFirebase(false, true); // Auto uses full sync by default now? Let's keep it consistent.
+  }, 24 * 60 * 60 * 1000);
 
   // Vite integration
   let vite;
@@ -949,16 +950,15 @@ async function cleanupExpiredJobsFromFirebase() {
 }
 
 let isSyncing = false;
-async function syncJobsToFirebase(isQuick: boolean = false) {
+async function syncJobsToFirebase(isQuick: boolean = false, isFull: boolean = false) {
   if (isSyncing) return { message: "Already syncing" };
   isSyncing = true;
-  console.log(`Starting background sync to Firebase (isQuick: ${isQuick})...`);
+  console.log(`Starting background sync to Firebase (isQuick: ${isQuick}, isFull: ${isFull})...`);
   try {
-    // First run the 3-month expiration cleanup
-    await cleanupExpiredJobsFromFirebase();
+    // Auto cleanup removed so they can be sorted in the admin panel
+    // await cleanupExpiredJobsFromFirebase();
 
-    const isWPFull = !isQuick;
-    const jobs = await fetchJobsFromWP(isWPFull); // get full or brief jobs
+    const jobs = await fetchJobsFromWP(isFull); // fetch full or brief jobs based on isFull
     let syncedCount = 0;
     
     // Write in batch chunk sizes of 200 (Firestore max batch size is 500)
@@ -967,13 +967,25 @@ async function syncJobsToFirebase(isQuick: boolean = false) {
       const chunk = jobs.slice(i, i + chunkSize);
       const batch = writeBatch(db);
       
-      for (const job of chunk) {
-        const jobRef = doc(db, 'jobs', job.id);
-        batch.set(jobRef, {
+      const docRefs = chunk.map(job => doc(db, 'jobs', job.id));
+      const docSnapshots = await Promise.all(docRefs.map(ref => getDoc(ref)));
+      
+      chunk.forEach((job, index) => {
+        const jobSnap = docSnapshots[index];
+        let fetchedAt = new Date().toISOString();
+        if (jobSnap.exists() && jobSnap.data().fetchedAt) {
+          fetchedAt = jobSnap.data().fetchedAt;
+        } else if (jobSnap.exists()) {
+          // Backfill old jobs so they don't look newly fetched today
+          fetchedAt = jobSnap.data().publishedDate || new Date().toISOString();
+        }
+
+        batch.set(docRefs[index], {
           ...job,
+          fetchedAt: fetchedAt,
           _syncToken: "BdGovtJobAdminSyncX123"
         });
-      }
+      });
       
       await batch.commit();
       syncedCount += chunk.length;
