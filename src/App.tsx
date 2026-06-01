@@ -6,6 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
+import { get as idbGet, set as idbSet } from 'idb-keyval';
 import InstallPWA from './components/InstallPWA';
 import ScrollButtons from './components/ScrollButtons';
 import { 
@@ -343,10 +344,12 @@ function FacebookComments({ url }: { url: string }) {
 
 const AdminPanel = ({ 
   onSync, 
+  allJobs,
   isSyncingFirebase,
   syncMessage
 }: { 
   onSync: (forceFull: boolean) => Promise<void>, 
+  allJobs: Job[],
   isSyncingFirebase: boolean,
   syncMessage: { text: string; type: 'success' | 'error' | 'idle' }
 }) => {
@@ -372,9 +375,13 @@ const AdminPanel = ({
 
   useEffect(() => {
     if (isAuthenticated) {
-      fetchAdminJobs();
+      if (allJobs.length > 0) {
+        setAdminJobs(allJobs);
+      } else {
+        fetchAdminJobs();
+      }
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, allJobs]);
 
   const handleSyncAndRefresh = async () => {
     await onSync(true); // Call the full sync
@@ -442,7 +449,7 @@ const AdminPanel = ({
   const filteredJobs = getFilteredJobs();
 
   return (
-    <div className="p-4 md:p-8 h-screen w-full bg-slate-50 flex flex-col font-sans overflow-hidden">
+    <div className="p-4 md:p-8 min-h-screen w-full bg-slate-50 flex flex-col font-sans">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
         <h1 className="text-xl md:text-2xl font-bold text-slate-800 flex items-center gap-2">
           <LayoutDashboard className="w-5 h-5 md:w-6 md:h-6 text-blue-600" />
@@ -512,7 +519,7 @@ const AdminPanel = ({
           </div>
         </div>
         
-        <div className="flex-1 overflow-auto p-0">
+        <div className="overflow-x-auto p-0">
           <table className="w-full text-left border-collapse text-sm min-w-[700px]">
             <thead className="bg-slate-50 sticky top-0 border-b border-slate-200 shadow-sm z-10">
               <tr>
@@ -523,7 +530,11 @@ const AdminPanel = ({
               </tr>
             </thead>
             <tbody>
-              {filteredJobs.length === 0 ? (
+              {isLoadingJobs ? (
+                <tr>
+                  <td colSpan={4} className="py-8 text-center text-slate-500">Loading jobs from Firebase...</td>
+                </tr>
+              ) : filteredJobs.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="py-8 text-center text-slate-500">No jobs found for this filter.</td>
                 </tr>
@@ -1086,9 +1097,21 @@ export default function App() {
 
     // Priority Cache Load
     try {
-      const cached = localStorage.getItem(CACHE_KEY);
-      if (cached) {
-        const { lastSyncTime, jobs: cachedJobs } = JSON.parse(cached);
+      // First try idb (the new way)
+      let cachedObj: any = await idbGet(CACHE_KEY);
+      
+      // Fallback: If not in idb, check localStorage and migrate
+      if (!cachedObj) {
+        const localCached = localStorage.getItem(CACHE_KEY);
+        if (localCached) {
+          cachedObj = JSON.parse(localCached);
+          await idbSet(CACHE_KEY, cachedObj); // migrate to idb
+          localStorage.removeItem(CACHE_KEY); // clear localStorage
+        }
+      }
+
+      if (cachedObj) {
+        const { lastSyncTime, jobs: cachedJobs } = cachedObj;
         if (Array.isArray(cachedJobs) && cachedJobs.length > 0) {
           console.log("Showing cached jobs immediately...");
           setJobs(cachedJobs);
@@ -1136,22 +1159,14 @@ export default function App() {
       const data = response.data;
       
       if (Array.isArray(data) && data.length > 0) {
-        // Refresh cache in background
+        // Refresh cache in background using idb
         try {
-          localStorage.setItem(CACHE_KEY, JSON.stringify({
+          await idbSet(CACHE_KEY, {
             lastSyncTime: Date.now(),
             jobs: data
-          }));
+          });
         } catch (e) {
-          console.warn("Failed to set job cache", e);
-          try {
-             localStorage.setItem(CACHE_KEY, JSON.stringify({
-               lastSyncTime: Date.now(),
-               jobs: data.slice(0, 250) // Fallback to smaller subset
-             }));
-          } catch (e2) {
-             console.error("Cache fallback failed", e2);
-          }
+          console.warn("Failed to set job cache to idb", e);
         }
         
         // Always store all known IDs separately (takes very little space) to avoid false "new job" alerts
@@ -1277,11 +1292,7 @@ export default function App() {
     return matchesSearch && matchesFilter;
   });
 
-  const totalPages = Math.ceil(filteredJobs.length / itemsPerPage);
-  const paginatedJobs = filteredJobs.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
-  );
+  const paginatedJobs = filteredJobs;
 
   // Effects to reset page when filters change
   useEffect(() => {
@@ -1383,10 +1394,11 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-screen bg-[#f8fafc] text-[#1e293b] font-sans overflow-hidden">
+    <div className={`flex bg-[#f8fafc] text-[#1e293b] font-sans ${activePage === 'admin' ? 'min-h-screen' : 'h-screen overflow-hidden'}`}>
       {activePage === 'admin' ? (
         <AdminPanel 
           onSync={handleManualSync} 
+          allJobs={jobs}
           isSyncingFirebase={isSyncingFirebase} 
           syncMessage={syncMessage} 
         />
@@ -1541,7 +1553,7 @@ export default function App() {
               <div className="pt-6 border-t border-white/5 flex flex-col gap-4">
                 <div className="flex flex-col gap-1.5">
                   <button
-                    onClick={handleManualSync}
+                    onClick={() => handleManualSync()}
                     disabled={isSyncingFirebase}
                     className={cn(
                       "w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-xs font-bold transition-all duration-200 shadow-md",
@@ -1962,59 +1974,6 @@ export default function App() {
                   </div>
                 )}
               </AnimatePresence>
-
-              {/* Pagination Controls */}
-              {!loading && filteredJobs.length > itemsPerPage && (
-                <div className="flex items-center justify-center gap-4 py-8">
-                  <button
-                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                    disabled={currentPage === 1}
-                    className="p-2 rounded-lg border border-[#e2e8f0] bg-white text-[#64748b] hover:bg-[#f1f5f9] disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                  >
-                    <ChevronLeft size={20} />
-                  </button>
-                  
-                  <div className="flex items-center gap-2">
-                    {Array.from({ length: Math.min(totalPages, 5) }).map((_, i) => {
-                      // Logic to show a window of pages
-                      let pageNum = i + 1;
-                      if (totalPages > 5) {
-                        if (currentPage > 3) {
-                          pageNum = currentPage - 2 + i;
-                          if (pageNum + (4 - i) > totalPages) {
-                             pageNum = totalPages - 4 + i;
-                          }
-                        }
-                      }
-                      
-                      if (pageNum > totalPages || pageNum < 1) return null;
-
-                      return (
-                        <button
-                          key={pageNum}
-                          onClick={() => setCurrentPage(pageNum)}
-                          className={cn(
-                            "w-10 h-10 rounded-lg text-sm font-bold transition-all",
-                            currentPage === pageNum
-                              ? "bg-[#3b82f6] text-white shadow-lg shadow-blue-100"
-                              : "bg-white border border-[#e2e8f0] text-[#64748b] hover:border-[#3b82f6]/50 hover:text-[#3b82f6]"
-                          )}
-                        >
-                          {pageNum}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <button
-                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                    disabled={currentPage === totalPages}
-                    className="p-2 rounded-lg border border-[#e2e8f0] bg-white text-[#64748b] hover:bg-[#f1f5f9] disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                  >
-                    <ChevronRight size={20} />
-                  </button>
-                </div>
-              )}
             </div>
 
             {/* Footer */}
