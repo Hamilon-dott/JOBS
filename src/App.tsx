@@ -343,12 +343,10 @@ function FacebookComments({ url }: { url: string }) {
 
 const AdminPanel = ({ 
   onSync, 
-  allJobs,
   isSyncingFirebase,
   syncMessage
 }: { 
   onSync: (forceFull: boolean) => Promise<void>, 
-  allJobs: Job[],
   isSyncingFirebase: boolean,
   syncMessage: { text: string; type: 'success' | 'error' | 'idle' }
 }) => {
@@ -356,17 +354,31 @@ const AdminPanel = ({
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [filter, setFilter] = useState<'all' | 'new' | 'recently-fetched' | 'expiring' | 'outdated'>('all');
   const [adminJobs, setAdminJobs] = useState<Job[]>([]);
+  const [isLoadingJobs, setIsLoadingJobs] = useState(false);
+
+  const fetchAdminJobs = async () => {
+    setIsLoadingJobs(true);
+    try {
+      const resp = await axios.get('/api/jobs?full=true');
+      if (Array.isArray(resp.data)) {
+        setAdminJobs(resp.data);
+      }
+    } catch (e) {
+      console.error("Admin fetch jobs error:", e);
+    } finally {
+      setIsLoadingJobs(false);
+    }
+  };
 
   useEffect(() => {
-    // Initialize adminJobs when allJobs changes
-    if (allJobs.length > 0) {
-      setAdminJobs(allJobs);
+    if (isAuthenticated) {
+      fetchAdminJobs();
     }
-  }, [allJobs]);
+  }, [isAuthenticated]);
 
   const handleSyncAndRefresh = async () => {
     await onSync(true); // Call the full sync
-    // Assuming onSync will update the root jobs eventually, but admin can also fetch if needed
+    await fetchAdminJobs();
   };
 
   const getFilteredJobs = () => {
@@ -430,13 +442,13 @@ const AdminPanel = ({
   const filteredJobs = getFilteredJobs();
 
   return (
-    <div className="p-8 h-screen w-full bg-slate-50 flex flex-col font-sans overflow-hidden">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-          <LayoutDashboard className="w-6 h-6 text-blue-600" />
+    <div className="p-4 md:p-8 h-screen w-full bg-slate-50 flex flex-col font-sans overflow-hidden">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+        <h1 className="text-xl md:text-2xl font-bold text-slate-800 flex items-center gap-2">
+          <LayoutDashboard className="w-5 h-5 md:w-6 md:h-6 text-blue-600" />
           Admin Dashboard
         </h1>
-        <button onClick={() => window.location.href = '/'} className="px-4 py-2 text-sm text-slate-600 hover:text-slate-900 border border-slate-300 rounded hover:bg-slate-100 transition">
+        <button onClick={() => window.location.href = '/'} className="px-4 py-2 text-sm text-slate-600 hover:text-slate-900 border border-slate-300 rounded hover:bg-slate-100 transition whitespace-nowrap">
           Exit Admin
         </button>
       </div>
@@ -479,75 +491,65 @@ const AdminPanel = ({
       </div>
 
       <div className="flex-1 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
-        <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex flex-wrap gap-2 items-center justify-between">
-          <h2 className="font-semibold text-slate-700">Circular Management</h2>
-          <div className="flex gap-2">
-            <button onClick={() => setFilter('all')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition ${filter === 'all' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+        <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex flex-col md:flex-row gap-3 items-start md:items-center justify-between">
+          <h2 className="font-semibold text-slate-700 whitespace-nowrap">Circular Management</h2>
+          <div className="flex overflow-x-auto pb-1 md:pb-0 gap-2 w-full md:w-auto">
+            <button onClick={() => setFilter('all')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition whitespace-nowrap ${filter === 'all' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
               All ({adminJobs.length})
             </button>
-            <button onClick={() => setFilter('new')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition ${filter === 'new' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+            <button onClick={() => setFilter('new')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition whitespace-nowrap ${filter === 'new' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
               Newly Added
             </button>
-            <button onClick={() => setFilter('recently-fetched')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition ${filter === 'recently-fetched' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
-              Newly Fetched (Sync)
+            <button onClick={() => setFilter('recently-fetched')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition whitespace-nowrap ${filter === 'recently-fetched' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+              Newly Fetched
             </button>
-            <button onClick={() => setFilter('expiring')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition ${filter === 'expiring' ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+            <button onClick={() => setFilter('expiring')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition whitespace-nowrap ${filter === 'expiring' ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
               Expiring (7 Days)
             </button>
-            <button onClick={() => setFilter('outdated')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition ${filter === 'outdated' ? 'bg-red-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
-              Outdated (3+ Months)
+            <button onClick={() => setFilter('outdated')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition whitespace-nowrap ${filter === 'outdated' ? 'bg-red-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+              Outdated
             </button>
           </div>
         </div>
         
-        <div className="flex-1 overflow-y-auto p-0">
-          <table className="w-full text-left border-collapse text-sm">
+        <div className="flex-1 overflow-auto p-0">
+          <table className="w-full text-left border-collapse text-sm min-w-[700px]">
             <thead className="bg-slate-50 sticky top-0 border-b border-slate-200 shadow-sm z-10">
               <tr>
                 <th className="py-3 px-4 text-slate-600 font-medium">Job Title</th>
-                {filter !== 'all' && (
-                  <>
-                    <th className="py-3 px-4 text-slate-600 font-medium whitespace-nowrap">Organization</th>
-                    <th className="py-3 px-4 text-slate-600 font-medium whitespace-nowrap">Published</th>
-                    <th className="py-3 px-4 text-slate-600 font-medium whitespace-nowrap">Deadline</th>
-                  </>
-                )}
+                <th className="py-3 px-4 text-slate-600 font-medium whitespace-nowrap">Organization</th>
+                <th className="py-3 px-4 text-slate-600 font-medium whitespace-nowrap">Published</th>
+                <th className="py-3 px-4 text-slate-600 font-medium whitespace-nowrap">Deadline</th>
               </tr>
             </thead>
             <tbody>
               {filteredJobs.length === 0 ? (
                 <tr>
-                  <td colSpan={filter === 'all' ? 1 : 4} className="py-8 text-center text-slate-500">No jobs found for this filter.</td>
+                  <td colSpan={4} className="py-8 text-center text-slate-500">No jobs found for this filter.</td>
                 </tr>
               ) : (
                 filteredJobs.map((job) => (
                   <tr key={job.id} className="border-b last:border-0 border-slate-100 hover:bg-slate-50 transition">
                     <td className="py-3 px-4">
                       <div className="font-medium text-slate-800">{job.title}</div>
-                      {filter !== 'all' && (
-                        <div className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
-                          <Tag className="w-3 h-3" />
-                          {job.source}
-                        </div>
-                      )}
+                      <div className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
+                        <Tag className="w-3 h-3" />
+                        {job.source}
+                      </div>
                     </td>
-                    {filter !== 'all' && (
-                      <>
-                        <td className="py-3 px-4 text-slate-600 max-w-[200px] truncate" title={job.organization}>{job.organization}</td>
-                        <td className="py-3 px-4 text-slate-500">
-                          {new Date(job.publishedDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
-                        </td>
-                        <td className="py-3 px-4">
-                          <span className={`px-2 py-1 rounded inline-block text-xs font-medium ${
-                            job.deadlineISO && new Date(job.deadlineISO) < new Date() 
-                              ? 'bg-red-50 text-red-700 border border-red-100' 
-                              : 'bg-green-50 text-green-700 border border-green-100'
-                          }`}>
-                            {job.deadline || 'N/A'}
-                          </span>
-                        </td>
-                      </>
-                    )}
+                    <td className="py-3 px-4 text-slate-600 max-w-[200px] truncate" title={job.organization}>{job.organization}</td>
+                    <td className="py-3 px-4 text-slate-500">
+                      {new Date(job.publishedDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    </td>
+                    <td className="py-3 px-4">
+                      <span className={`px-2 py-1 rounded inline-block text-xs font-medium ${
+                        job.deadlineISO && new Date(job.deadlineISO) < new Date() 
+                          ? 'bg-red-50 text-red-700 border border-red-100' 
+                          : 'bg-green-50 text-green-700 border border-green-100'
+                      }`}>
+                        {job.deadline || 'N/A'}
+                      </span>
+                    </td>
                   </tr>
                 ))
               )}
@@ -1385,7 +1387,6 @@ export default function App() {
       {activePage === 'admin' ? (
         <AdminPanel 
           onSync={handleManualSync} 
-          allJobs={jobs} 
           isSyncingFirebase={isSyncingFirebase} 
           syncMessage={syncMessage} 
         />
