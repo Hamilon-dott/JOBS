@@ -592,6 +592,7 @@ export default function App() {
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'updated' | 'up-to-date'>('idle');
   const [isSyncingFirebase, setIsSyncingFirebase] = useState(false);
   const [syncMessage, setSyncMessage] = useState<{ text: string; type: 'success' | 'error' | 'idle' }>({ text: '', type: 'idle' });
+  const [lastSyncTime, setLastSyncTime] = useState<number | null>(null);
 
   const aiRef = React.useRef<GoogleGenAI | null>(null);
   const scrollContainerRef = React.useRef<HTMLDivElement>(null);
@@ -1111,10 +1112,13 @@ export default function App() {
       }
 
       if (cachedObj) {
-        const { lastSyncTime, jobs: cachedJobs } = cachedObj;
+        const { lastSyncTime: cachedSyncTime, jobs: cachedJobs } = cachedObj;
         if (Array.isArray(cachedJobs) && cachedJobs.length > 0) {
           console.log("Showing cached jobs immediately...");
           setJobs(cachedJobs);
+          if (cachedSyncTime) {
+            setLastSyncTime(cachedSyncTime);
+          }
           setCurrentPage(1);
           setLoading(false);
           hasCachedData = true;
@@ -1159,10 +1163,12 @@ export default function App() {
       const data = response.data;
       
       if (Array.isArray(data) && data.length > 0) {
+        const fetchTimeNow = Date.now();
+        setLastSyncTime(fetchTimeNow);
         // Refresh cache in background using idb
         try {
           await idbSet(CACHE_KEY, {
-            lastSyncTime: Date.now(),
+            lastSyncTime: fetchTimeNow,
             jobs: data
           });
         } catch (e) {
@@ -1391,6 +1397,29 @@ export default function App() {
       .join('')
       .slice(0, 2)
       .toUpperCase();
+  };
+
+  const formatLastSyncTime = (timestamp: number | null) => {
+    if (!timestamp) return '';
+    try {
+      const date = new Date(timestamp);
+      const day = toBengaliNumber(date.getDate());
+      const monthNames = ['জানুয়ারি', 'ফেব্রুয়ারি', 'মার্চ', 'এপ্রিল', 'মে', 'জুন', 'জুলাই', 'আগস্ট', 'সেপ্টেম্বর', 'অক্টোবর', 'নভেম্বর', 'ডিসেম্বর'];
+      const month = monthNames[date.getMonth()];
+      const year = toBengaliNumber(date.getFullYear());
+      
+      let hours = date.getHours();
+      const minutesRaw = date.getMinutes();
+      const minutes = minutesRaw < 10 ? '০' + toBengaliNumber(minutesRaw) : toBengaliNumber(minutesRaw);
+      const ampm = hours >= 12 ? 'বিকাল' : 'সকাল';
+      hours = hours % 12;
+      hours = hours ? hours : 12;
+      const hoursBengali = toBengaliNumber(hours);
+      
+      return `সর্বশেষ আপডেট: ${day} ${month} ${year}, ${ampm} ${hoursBengali}:${minutes}`;
+    } catch {
+      return '';
+    }
   };
 
   return (
@@ -1762,9 +1791,17 @@ export default function App() {
             </div>
 
 
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-[20px] font-bold text-[#0f172a]">সর্বশেষ সার্কুলারসমূহ</h2>
-              <div className="flex items-center gap-2 text-[14px] text-[#64748b] font-medium bg-slate-100 px-3 py-1 rounded-full">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-6">
+              <div>
+                <h2 className="text-[20px] font-bold text-[#0f172a]">সর্বশেষ সার্কুলারসমূহ</h2>
+                {lastSyncTime && (
+                  <p className="text-xs text-[#64748b] mt-1 font-semibold flex items-center gap-1.5 selection:bg-none">
+                    <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                    <span>{formatLastSyncTime(lastSyncTime)}</span>
+                  </p>
+                )}
+              </div>
+              <div className="flex items-center gap-2 text-[14px] text-[#64748b] font-medium bg-slate-100 px-3 py-1 rounded-full self-start sm:self-center">
                 {toBengaliNumber(filteredJobs.length)} টি সার্কুলার পাওয়া গেছে
               </div>
             </div>
