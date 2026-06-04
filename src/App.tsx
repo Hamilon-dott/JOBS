@@ -714,8 +714,13 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 20;
   const [favorites, setFavorites] = useState<string[]>(() => {
-    const saved = localStorage.getItem('jobSyncFavorites');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem('jobSyncFavorites');
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      return [];
+    }
   });
 
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -935,7 +940,9 @@ export default function App() {
   }, [jobs, activePage]);
 
   useEffect(() => {
-    localStorage.setItem('jobSyncFavorites', JSON.stringify(favorites));
+    try {
+      localStorage.setItem('jobSyncFavorites', JSON.stringify(favorites));
+    } catch (e) {}
   }, [favorites]);
 
   const toggleFavorite = (id: string, e?: React.MouseEvent) => {
@@ -1132,12 +1139,14 @@ export default function App() {
       
       // Fallback: If not in idb, check localStorage and migrate
       if (!cachedObj) {
-        const localCached = localStorage.getItem(CACHE_KEY);
-        if (localCached) {
-          cachedObj = JSON.parse(localCached);
-          await idbSet(CACHE_KEY, cachedObj); // migrate to idb
-          localStorage.removeItem(CACHE_KEY); // clear localStorage
-        }
+        try {
+          const localCached = localStorage.getItem(CACHE_KEY);
+          if (localCached) {
+            cachedObj = JSON.parse(localCached);
+            await idbSet(CACHE_KEY, cachedObj); // migrate to idb
+            localStorage.removeItem(CACHE_KEY); // clear localStorage
+          }
+        } catch(e) {}
       }
 
       if (cachedObj) {
@@ -1206,7 +1215,10 @@ export default function App() {
         let lastKnownIds: string[] = [];
         try {
            const stored = localStorage.getItem('last_known_ids');
-           if (stored) lastKnownIds = JSON.parse(stored);
+           if (stored) {
+             const parsed = JSON.parse(stored);
+             lastKnownIds = Array.isArray(parsed) ? parsed : [];
+           }
            const allIds = Array.from(new Set([...lastKnownIds, ...data.map((j: Job) => String(j.id))]));
            localStorage.setItem('last_known_ids', JSON.stringify(allIds.slice(0, 500))); // keep last 500
         } catch (e) {

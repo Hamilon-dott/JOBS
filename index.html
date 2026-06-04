@@ -28,27 +28,7 @@
         e.preventDefault();
         window.deferredPWAInstallPrompt = e;
       });
-
-      // Some 3rd party scripts (like AdSense) try to overwrite window.fetch
-      // In some environments, window.fetch is a getter-only property which causes a crash.
-      (function() {
-        try {
-          var originalFetch = window.fetch;
-          Object.defineProperty(window, 'fetch', {
-            configurable: true,
-            enumerable: true,
-            get: function() { return originalFetch; },
-            set: function(v) { 
-              console.warn('Something tried to override native fetch. Operation ignored.');
-            }
-          });
-        } catch (e) {
-          console.warn('Fetch shim failed', e);
-        }
-      })();
     </script>
-    <script async defer crossorigin="anonymous" src="https://connect.facebook.net/en_US/sdk.js#xfbml=1&version=v17.0" nonce="jX0x0x0x"></script>
-    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-7608093638667157" crossorigin="anonymous"></script>
   </head>
   <body>
     <div id="root"></div>
