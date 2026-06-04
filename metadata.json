@@ -2,5 +2,5 @@
   "name": "Jobs.talukdaracademy.com.bd",
   "description": "An updated Bangladesh job circular website that post latest job circulars.",
   "requestFramePermissions": [],
-  "majorCapabilities": []
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

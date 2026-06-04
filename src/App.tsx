@@ -599,7 +599,19 @@ export default function App() {
 
   const getAI = () => {
     if (!aiRef.current) {
-      const apiKey = process.env.GEMINI_API_KEY;
+      let apiKey = "";
+      try {
+        apiKey = (import.meta.env.VITE_GEMINI_API_KEY as string) || "";
+      } catch (e) {}
+
+      if (!apiKey) {
+        try {
+          if (typeof process !== 'undefined' && process.env) {
+            apiKey = process.env.GEMINI_API_KEY || "";
+          }
+        } catch (e) {}
+      }
+
       if (apiKey) {
         aiRef.current = new GoogleGenAI({ apiKey });
       }
@@ -631,9 +643,13 @@ export default function App() {
     const STATE_KEY = 'job_bd_active';
     
     // Only initialized once per session history
-    if (window.history.state !== STATE_KEY) {
-      window.history.replaceState(window.history.state, '', window.location.href);
-      window.history.pushState(STATE_KEY, '', window.location.href);
+    try {
+      if (window.history.state !== STATE_KEY) {
+        window.history.replaceState(window.history.state, '', window.location.href);
+        window.history.pushState(STATE_KEY, '', window.location.href);
+      }
+    } catch (err) {
+      console.warn("History manipulation blocked by environment limits", err);
     }
 
     const handlePopState = (e: PopStateEvent) => {
@@ -650,7 +666,11 @@ export default function App() {
         if (job) setSelectedJob(job);
       } else if (!showExitConfirmRef.current && !selectedJobRef.current) {
         // Only show exit confirm if we're at the root and moving back
-        window.history.pushState(STATE_KEY, '', window.location.href);
+        try {
+          window.history.pushState(STATE_KEY, '', window.location.href);
+        } catch (err) {
+          console.warn("pushState blocked by environment limits", err);
+        }
         setShowExitConfirm(true);
       } else {
         setShowExitConfirm(false);
@@ -744,7 +764,11 @@ export default function App() {
       if (url.pathname !== `/jobs/${jobSlug}` || url.searchParams.get('job')) {
         url.pathname = `/jobs/${jobSlug}`;
         url.searchParams.delete('job');
-        window.history.pushState({ job: selectedJob.id }, '', url.toString());
+        try {
+          window.history.pushState({ job: selectedJob.id }, '', url.toString());
+        } catch (err) {
+          console.warn("pushState blocked by environment limits", err);
+        }
       }
 
       // Add/Update Canonical Link (Client-Side)
@@ -860,7 +884,11 @@ export default function App() {
                 // If jobs are loaded and we've waited a bit, we can clear
                 url.pathname = '/';
                 url.searchParams.delete('job');
-                window.history.pushState({}, '', url.toString());
+                try {
+                  window.history.pushState({}, '', url.toString());
+                } catch (err) {
+                  console.warn("pushState blocked by environment limits", err);
+                }
               }
            }
         }
@@ -1093,8 +1121,9 @@ export default function App() {
 
   const fetchJobs = async (force: boolean = false) => {
     const CACHE_KEY = 'job_db_cache';
-
     let hasCachedData = false;
+    let cachedSyncTime: number | null = null;
+    let cachedJobs: Job[] = [];
 
     // Priority Cache Load
     try {
@@ -1112,12 +1141,13 @@ export default function App() {
       }
 
       if (cachedObj) {
-        const { lastSyncTime: cachedSyncTime, jobs: cachedJobs } = cachedObj;
-        if (Array.isArray(cachedJobs) && cachedJobs.length > 0) {
-          console.log("Showing cached jobs immediately...");
-          setJobs(cachedJobs);
-          if (cachedSyncTime) {
-            setLastSyncTime(cachedSyncTime);
+        const { lastSyncTime: savedSyncTime, jobs: savedJobs } = cachedObj;
+        if (Array.isArray(savedJobs) && savedJobs.length > 0) {
+          cachedJobs = savedJobs;
+          cachedSyncTime = savedSyncTime || null;
+          setJobs(savedJobs);
+          if (savedSyncTime) {
+            setLastSyncTime(savedSyncTime);
           }
           setCurrentPage(1);
           setLoading(false);
@@ -1128,35 +1158,32 @@ export default function App() {
       console.warn("Failed to read job cache", e);
     }
 
-    const lastCheckKey = 'last_job_check_timestamp';
     const now = Date.now();
+    // Check if the cache is still valid (less than 24 hours old) and not forced
+    const isCacheValid = cachedSyncTime && (now - cachedSyncTime) < 24 * 60 * 60 * 1000;
+    
     let shouldCheckForUpdates = force;
 
     if (!hasCachedData) {
       setLoading(true);
       setIsFirstVisit(true);
       shouldCheckForUpdates = true;
-      localStorage.setItem(lastCheckKey, now.toString());
     } else if (!force) {
-      const lastCheck = localStorage.getItem(lastCheckKey);
-      const hoursSinceLastCheck = lastCheck ? (now - parseInt(lastCheck, 10)) / (1000 * 60 * 60) : Infinity;
-      
-      if (hoursSinceLastCheck >= 24) {
+      if (!isCacheValid) {
         shouldCheckForUpdates = true;
         setUpdateStatus('checking');
-        localStorage.setItem(lastCheckKey, now.toString());
       }
     } else {
       setUpdateStatus('checking');
-      localStorage.setItem(lastCheckKey, now.toString());
     }
     
     if (!shouldCheckForUpdates) {
-      // Skip background check if already checked today
+      // Skip background check if already updated in the last 24 hours
+      console.log("Skipping background check since local data was updated less than 24 hours ago.");
       return;
     }
 
-    // Background Full Load
+    // Background Full Load from Firebase/Server API because cache expired or forced
     try {
       const timestamp = Date.now();
       const response = await axios.get(`/api/jobs?full=true&t=${timestamp}`);
@@ -1187,13 +1214,13 @@ export default function App() {
         }
 
         if (hasCachedData) {
-          const existingIds = new Set(jobsRef.current.map(j => String(j.id)));
+          const existingIds = new Set(cachedJobs.map(j => String(j.id)));
           const knownIdsSet = new Set(lastKnownIds);
-          const existingTitles = new Set(jobsRef.current.map(j => j.title.toLowerCase()));
+          const existingTitles = new Set(cachedJobs.map(j => j.title.toLowerCase()));
           
           const newJobs = data.filter(j => !existingIds.has(String(j.id)) && !knownIdsSet.has(String(j.id)) && !existingTitles.has(j.title.toLowerCase()));
           
-          if (newJobs.length > 0 && jobsRef.current.length > 0) {
+          if (newJobs.length > 0 && cachedJobs.length > 0) {
              // Instant show new jobs
              setJobs(data);
              setUpdateStatus('updated');

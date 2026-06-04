@@ -208,11 +208,52 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
     }
   });
 
-  // Schedule background sync every 24 hours
-  setInterval(() => {
-    console.log("Running scheduled 24-hour sync to Firebase...");
-    syncJobsToFirebase(false, true); // Auto uses full sync by default now? Let's keep it consistent.
-  }, 24 * 60 * 60 * 1000);
+  // Schedule background sync daily at 1:00 PM Bangladesh Standard Time (BST = UTC+6), i.e., 07:00 AM UTC
+  function scheduleDailySyncAtOnePmBST() {
+    const getMsUntilNextRun = () => {
+      const now = new Date();
+      // Target is 7:00 AM UTC (which is 1:00 PM BST)
+      const targetUTC = new Date(Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        7, // 7:00 AM UTC
+        0, // 0 minutes
+        0, // 0 seconds
+        0  // 0 milliseconds
+      ));
+
+      // If 7:00 AM UTC has already passed today, target 7:00 AM UTC tomorrow
+      if (now.getTime() >= targetUTC.getTime()) {
+        targetUTC.setUTCDate(targetUTC.getUTCDate() + 1);
+      }
+
+      return targetUTC.getTime() - now.getTime();
+    };
+
+    const planNext = () => {
+      const msToNext = getMsUntilNextRun();
+      const hoursToNext = (msToNext / (1000 * 60 * 60)).toFixed(2);
+      console.log(`[BST Scheduler] Next daily sync (1:00 PM BST / 7:00 AM UTC) is scheduled in ${hoursToNext} hours.`);
+      
+      setTimeout(async () => {
+        console.log("[BST Scheduler] It is 1:00 PM BST. Starting scheduled daily sync to Firebase...");
+        try {
+          const result = await syncJobsToFirebase(false, true); // Full background sync
+          console.log("[BST Scheduler] Sync result:", result);
+          await cleanupExpiredJobsFromFirebase();
+        } catch (error) {
+          console.error("[BST Scheduler] Scheduled sync error:", error);
+        }
+        // Plan next run for the following day
+        planNext();
+      }, msToNext);
+    };
+
+    planNext();
+  }
+
+  scheduleDailySyncAtOnePmBST();
 
   // Vite integration
   let vite;
@@ -926,7 +967,9 @@ async function cleanupExpiredJobsFromFirebase() {
   console.log("Checking for expired jobs (deadline passed by more than 3 months) to delete...");
   try {
     const jobsRef = collection(db, 'jobs');
-    const snapshot = await getDocs(jobsRef);
+    // Optimize: Fetch only the 30 oldest jobs (ordered oldest first) instead of a full collection scan which consumes O(N) reads
+    const q = query(jobsRef, orderBy('publishedDate', 'asc'), limit(30));
+    const snapshot = await getDocs(q);
     const cutoffDate = new Date();
     cutoffDate.setMonth(cutoffDate.getMonth() - 3); // 3 months ago
 
@@ -958,7 +1001,7 @@ interface FirestoreCache {
 
 let cachedLatestJobsFull: FirestoreCache | null = null;
 let cachedLatestJobsBrief: FirestoreCache | null = null;
-const FIRESTORE_CACHE_TTL = 15 * 60 * 1000; // Cache Firestore queries for 15 minutes to save reads
+const FIRESTORE_CACHE_TTL = 24 * 60 * 60 * 1000; // Cache Firestore queries for 24 hours to save reads
 
 let isSyncing = false;
 async function syncJobsToFirebase(isQuick: boolean = false, isFull: boolean = false) {
@@ -991,16 +1034,21 @@ async function syncJobsToFirebase(isQuick: boolean = false, isFull: boolean = fa
     
     // Check if the newly fetched data is completely identical to the Firestore version.
     // This avoids performing Firestore custom Write operations on identical existing records, conserving the 20K write quota!
+    const normalizeStr = (s: any) => {
+      if (typeof s !== 'string') return '';
+      return s.trim().replace(/\s+/g, ' ');
+    };
+
     const isIdentical = (jobA: any, jobB: any) => {
       return (
-        jobA.title === jobB.title &&
-        jobA.organization === jobB.organization &&
-        jobA.deadline === jobB.deadline &&
+        normalizeStr(jobA.title) === normalizeStr(jobB.title) &&
+        normalizeStr(jobA.organization) === normalizeStr(jobB.organization) &&
+        normalizeStr(jobA.deadline) === normalizeStr(jobB.deadline) &&
         jobA.publishedDate === jobB.publishedDate &&
-        jobA.source === jobB.source &&
-        jobA.link === jobB.link &&
-        jobA.location === jobB.location &&
-        jobA.content === jobB.content &&
+        normalizeStr(jobA.source) === normalizeStr(jobB.source) &&
+        normalizeStr(jobA.link) === normalizeStr(jobB.link) &&
+        normalizeStr(jobA.location) === normalizeStr(jobB.location) &&
+        normalizeStr(jobA.content) === normalizeStr(jobB.content) &&
         JSON.stringify(jobA.imageUrls || []) === JSON.stringify(jobB.imageUrls || [])
       );
     };
