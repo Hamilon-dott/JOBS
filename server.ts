@@ -846,8 +846,8 @@ async function fetchJobsFromWP(isFull: boolean = false) {
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(today.getDate() - 30);
   
-  const targetCount = isFull ? 500 : 40;
-  const maxSearchPages = isFull ? 10 : 2; // Increase page limit to account for filtered items
+  const targetCount = isFull ? 100 : 20;
+  const maxSearchPages = isFull ? 4 : 2; // Increase page limit to account for filtered items
 
   for (const source of sources) {
     try {
@@ -1075,13 +1075,15 @@ async function syncJobsToFirebase(isQuick: boolean = false, isFull: boolean = fa
           // If the data matches perfectly, do not queue a write. We save a write operation!
           if (isIdentical(job, existingJob)) {
             skippedCount++;
+            job.fetchedAt = fetchedAt; // Ensure memory object has it
             return;
           }
         }
 
+        job.fetchedAt = fetchedAt; // Ensure memory object has it
+
         batch.set(doc(db, 'jobs', job.id), {
           ...job,
-          fetchedAt: fetchedAt,
           _syncToken: "BdGovtJobAdminSyncX123"
         });
         batchSize++;
@@ -1096,6 +1098,25 @@ async function syncJobsToFirebase(isQuick: boolean = false, isFull: boolean = fa
     // Upon successful sync, immediately invalidate server memory caches so users see changes instantly
     cachedLatestJobsFull = null;
     cachedLatestJobsBrief = null;
+
+    try {
+        console.log("Saving grouped jobs_cache document to save reads...");
+        // Re-fetch local array because it might be out of order?
+        // Actually, the `jobs` variable holds the newest fetched from WP! Wait, but it is from WP. Does WP returns them ordered and clean?
+        // `jobs` is already ordered!
+        const top100 = jobs.slice(0, 100);
+        const top20 = top100.slice(0, 20);
+        
+        await setDoc(doc(db, 'system', 'jobs_cache'), {
+           full: JSON.stringify(top100),
+           brief: JSON.stringify(top20),
+           timestamp: Date.now(),
+           _syncToken: "BdGovtJobAdminSyncX123"
+        });
+        console.log("Successfully saved grouped jobs_cache document!");
+    } catch (e) {
+        console.error("Failed to save grouped jobs_cache document", e);
+    }
     
     console.log(`Synced ${syncedCount} jobs to Firebase successfully using writeBatch (Skipped ${skippedCount} unchanged jobs to save writes).`);
     return { success: true, count: syncedCount, skipped: skippedCount };
@@ -1127,22 +1148,42 @@ async function fetchLatestJobs(isFull: boolean = false) {
   }
 
   try {
-    const jobsRef = collection(db, 'jobs');
-    const limitCount = isFull ? 500 : 40;
-    const q = query(jobsRef, orderBy('publishedDate', 'desc'), limit(limitCount));
-    const snapshot = await getDocs(q);
-    
-    if (snapshot.empty) {
-      console.log("Firebase is empty, triggering sync in background...");
-      syncJobsToFirebase();
-      return fetchJobsFromWP(isFull);
+    let jobs = null;
+    try {
+      const cacheSnap = await getDoc(doc(db, 'system', 'jobs_cache'));
+      if (cacheSnap.exists()) {
+        const data = cacheSnap.data();
+        if (isFull && data.full) {
+            jobs = JSON.parse(data.full);
+        } else if (!isFull && data.brief) {
+            jobs = JSON.parse(data.brief);
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to read system jobs_cache document, falling back to query...");
     }
-    
-    const jobs = snapshot.docs.map(doc => {
-      const data = doc.data();
-      delete data._syncToken;
-      return data;
-    });
+
+    if (jobs && Array.isArray(jobs) && jobs.length > 0) {
+      console.log("Served jobs from system jobs_cache document! (1 read)");
+    } else {
+      console.log("Querying jobs collection directly - this costs multiple reads...");
+      const jobsRef = collection(db, 'jobs');
+      const limitCount = isFull ? 100 : 20;
+      const q = query(jobsRef, orderBy('publishedDate', 'desc'), limit(limitCount));
+      const snapshot = await getDocs(q);
+      
+      if (snapshot.empty) {
+        console.log("Firebase is empty, triggering sync in background...");
+        syncJobsToFirebase();
+        return fetchJobsFromWP(isFull);
+      }
+      
+      jobs = snapshot.docs.map(doc => {
+        const data = doc.data();
+        delete data._syncToken;
+        return data;
+      });
+    }
 
     // Populate server memory caches
     if (isFull) {

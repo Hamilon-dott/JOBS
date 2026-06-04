@@ -9,5 +9,10 @@ service cloud.firestore {
       allow read: if true;
       allow write: if request.resource.data._syncToken == "BdGovtJobAdminSyncX123";
     }
+
+    match /system/{document=**} {
+      allow read: if true;
+      allow write: if request.resource.data._syncToken == "BdGovtJobAdminSyncX123";
+    }
   }
 }
