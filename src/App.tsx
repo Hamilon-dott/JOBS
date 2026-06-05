@@ -1149,7 +1149,7 @@ export default function App() {
 
     const now = Date.now();
     // Check if the cache has enough items. If it's too small (remnant of old firebase limit), we force an update.
-    const isCacheTooSmall = cachedJobs.length < 150;
+    const isCacheTooSmall = cachedJobs.length < 25;
     // Check if the cache is still valid (less than 1 hour old for fresh updates) and has enough jobs
     const isCacheValid = cachedSyncTime && (now - cachedSyncTime) < 1 * 60 * 60 * 1000 && !isCacheTooSmall;
     
