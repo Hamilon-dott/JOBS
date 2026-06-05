@@ -4,7 +4,6 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import https from 'https';
 import fs from 'fs';
-import fallbackJobs from './public/fallback_jobs.json';
 
 // Initialize Cache
 // Slug generation function
@@ -785,8 +784,33 @@ let cachedJobsBrief: any[] | null = null;
 let lastFetchBrief: number = 0;
 const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 
+let fallbackJobsCache: any[] | null = null;
+function getFallbackJobs(): any[] {
+  if (fallbackJobsCache) return fallbackJobsCache;
+  const pathsText = [
+    path.join(process.cwd(), 'public', 'fallback_jobs.json'),
+    path.join(process.cwd(), 'fallback_jobs.json'),
+    path.join(__dirname, '..', 'public', 'fallback_jobs.json'),
+    path.join(__dirname, 'public', 'fallback_jobs.json')
+  ];
+  for (const p of pathsText) {
+    try {
+      if (fs.existsSync(p)) {
+        const data = fs.readFileSync(p, 'utf8');
+        fallbackJobsCache = JSON.parse(data);
+        console.log(`Successfully loaded ${fallbackJobsCache?.length} fallback jobs dynamically from: ${p}`);
+        return fallbackJobsCache || [];
+      }
+    } catch (err: any) {
+      console.error(`Error reading cached json at ${p}:`, err.message);
+    }
+  }
+  return [];
+}
+
 function mergeWithFallbackJobs(retrievedJobs: any[]): any[] {
   const merged = [...retrievedJobs];
+  const fallbackJobs = getFallbackJobs();
   if (Array.isArray(fallbackJobs)) {
     fallbackJobs.forEach((fbJob: any) => {
       const titleLower = fbJob.title.toLowerCase().trim();
@@ -921,9 +945,10 @@ async function fetchJobsFromWP(isFull: boolean = false) {
 
   // Load from static local JSON file fetched at build-time or saved locally
   try {
-    if (Array.isArray(fallbackJobs) && fallbackJobs.length > 0) {
-      console.log(`Loaded ${fallbackJobs.length} static fallback/cached jobs from imported JSON module.`);
-      const resultList = fallbackJobs;
+    const fJobs = getFallbackJobs();
+    if (Array.isArray(fJobs) && fJobs.length > 0) {
+      console.log(`Loaded ${fJobs.length} static fallback/cached jobs dynamically.`);
+      const resultList = fJobs;
       if (isFull) {
         cachedJobsFull = resultList;
         lastFetchFull = Date.now();
@@ -934,7 +959,7 @@ async function fetchJobsFromWP(isFull: boolean = false) {
       return resultList;
     }
   } catch (err: any) {
-    console.error("Failed to load imported fallback_jobs.json:", err.message);
+    console.error("Failed to load dynamic fallback_jobs.json:", err.message);
   }
 
   const todayDate = new Date().toISOString();
