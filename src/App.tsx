@@ -1059,7 +1059,15 @@ export default function App() {
     }
   };
 
-  const getFallbackJobs = () => {
+  const getFallbackJobs = async () => {
+    try {
+      const resp = await axios.get('/fallback_jobs.json');
+      if (Array.isArray(resp.data) && resp.data.length > 0) {
+        return resp.data;
+      }
+    } catch (e) {
+      console.warn("Failed static asset fallback jobs read:", e);
+    }
     const today = new Date().toLocaleDateString();
     return [
       {
@@ -1223,12 +1231,18 @@ export default function App() {
           setUpdateStatus('idle');
         }
       } else {
-        if (hasCachedData) setUpdateStatus('idle');
+        if (hasCachedData) {
+          setUpdateStatus('idle');
+        } else {
+          const fallback = await getFallbackJobs();
+          setJobs(fallback);
+        }
       }
     } catch (error) {
       console.error('Failed to fetch jobs:', error);
       if (!hasCachedData) {
-        setJobs(getFallbackJobs());
+        const fallback = await getFallbackJobs();
+        setJobs(fallback);
       }
       setUpdateStatus('idle');
     } finally {
