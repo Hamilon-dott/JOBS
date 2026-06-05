@@ -4,6 +4,10 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import https from 'https';
 import fs from 'fs';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Initialize Cache
 // Slug generation function
@@ -217,7 +221,8 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
   // Vite integration
   let vite;
   if (process.env.NODE_ENV !== 'production') {
-    const { createServer: createViteServer } = await import('vite');
+    const viteModule = 'vite';
+    const { createServer: createViteServer } = await import(viteModule);
     vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'custom',
@@ -651,7 +656,7 @@ function processWpPost(post: any, sourceName: string, thirtyDaysAgo: Date, today
     if (result) return result;
 
     for (const label of labels) {
-      const regex = new RegExp(`${label}\\s*[:\sম=]+(?:<[^>]+>)*\s*([^<>\n]+)`, 'i');
+      const regex = new RegExp(`${label}\\s*[:\\sম=]+(?:<[^>]+>)*\\s*([^<>\\n]+)`, 'i');
       const match = rawContent.match(regex);
       if (match && match[1]) {
         const val = match[1].replace(/<\/?[^>]+(>|$)/g, "").trim();
