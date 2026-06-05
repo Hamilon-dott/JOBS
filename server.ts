@@ -1,5 +1,4 @@
 import express from 'express';
-import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
@@ -219,6 +218,7 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
   // Vite integration
   let vite;
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'custom',
