@@ -803,10 +803,10 @@ async function fetchJobsFromWP(isFull: boolean = false) {
   const seenTitles = new Set();
   const today = new Date();
   const thirtyDaysAgo = new Date();
-  thirtyDaysAgo.setDate(today.getDate() - 30);
+  thirtyDaysAgo.setDate(today.getDate() - 60);
   
-  const targetCount = isFull ? 300 : 40;
-  const maxSearchPages = isFull ? 15 : 2; // Increase page limit to account for filtered items
+  const targetCount = isFull ? 500 : 40;
+  const maxSearchPages = isFull ? 25 : 2; // Increase page limit to account for filtered items
 
   for (const source of sources) {
     try {

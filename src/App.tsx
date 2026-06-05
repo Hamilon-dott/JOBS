@@ -1140,10 +1140,12 @@ export default function App() {
     }
 
     const now = Date.now();
-    // Check if the cache is still valid (less than 24 hours old) and not forced
-    const isCacheValid = cachedSyncTime && (now - cachedSyncTime) < 24 * 60 * 60 * 1000;
+    // Check if the cache has enough items. If it's too small (remnant of old firebase limit), we force an update.
+    const isCacheTooSmall = cachedJobs.length < 150;
+    // Check if the cache is still valid (less than 1 hour old for fresh updates) and has enough jobs
+    const isCacheValid = cachedSyncTime && (now - cachedSyncTime) < 1 * 60 * 60 * 1000 && !isCacheTooSmall;
     
-    let shouldCheckForUpdates = force;
+    let shouldCheckForUpdates = force || isCacheTooSmall;
 
     if (!hasCachedData) {
       setLoading(true);
@@ -1309,7 +1311,36 @@ export default function App() {
     return matchesSearch && matchesFilter;
   });
 
-  const paginatedJobs = filteredJobs;
+  // Pin the most recent "সাপ্তাহিক চাকরির খবর পত্রিকা" matching post to the top of the list
+  const getProcessedJobs = () => {
+    let list = [...filteredJobs];
+    const weeklyJobs = jobs.filter(j => 
+      j.title.includes('সাপ্তাহিক') && (j.title.includes('চাকরি') || j.title.includes('খবর') || j.title.includes('ডাক') || j.title.includes('পত্রিকা'))
+    );
+    
+    if (weeklyJobs.length > 0) {
+      // Find the single absolute most recent weekly job post
+      weeklyJobs.sort((a, b) => new Date(b.publishedDate).getTime() - new Date(a.publishedDate).getTime());
+      const targetWeeklyJob = weeklyJobs[0];
+      
+      // Remove it from the current list position if it exists there to avoid duplication
+      list = list.filter(j => String(j.id) !== String(targetWeeklyJob.id));
+      
+      // Determine if we should pin it.
+      // Pin to the dynamic first position if:
+      // 1. It is already matched by active search/category filters, OR
+      // 2. The user is in general (search-less/default) categories view where we want to highlight it.
+      const isGeneralView = activeFilter === 'All' && !searchTerm && filterCategory === 'সকল ক্যাটাগরি' && filterDeadline === 'যেকোনো সময়সীমা' && filterPublishDate === 'যেকোনো প্রকাশের তারিখ';
+      const isInitiallyMatched = filteredJobs.some(j => String(j.id) === String(targetWeeklyJob.id));
+      
+      if (isInitiallyMatched || isGeneralView) {
+        list.unshift(targetWeeklyJob);
+      }
+    }
+    return list;
+  };
+
+  const paginatedJobs = getProcessedJobs();
 
   // Effects to reset page when filters change
   useEffect(() => {
@@ -1812,7 +1843,7 @@ export default function App() {
                 )}
               </div>
               <div className="flex items-center gap-2 text-[14px] text-[#64748b] font-medium bg-slate-100 px-3 py-1 rounded-full self-start sm:self-center">
-                {toBengaliNumber(filteredJobs.length)} টি সার্কুলার পাওয়া গেছে
+                {toBengaliNumber(paginatedJobs.length)} টি সার্কুলার পাওয়া গেছে
               </div>
             </div>
 
