@@ -41,8 +41,9 @@ function generateSlug(title: string, orgName?: string | null, fallbackId?: strin
   return slug;
 }
 
+export const app = express();
+
 async function startServer() {
-  const app = express();
   const PORT = 3000;
 
   app.use(express.json());
@@ -463,9 +464,11 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
     }
   });
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running at http://localhost:${PORT}`);
-  });
+  if (!process.env.VERCEL) {
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Server running at http://localhost:${PORT}`);
+    });
+  }
 }
 
 const httpsAgent = new https.Agent({  
@@ -806,24 +809,34 @@ async function fetchJobsFromWP(isFull: boolean = false) {
   thirtyDaysAgo.setDate(today.getDate() - 60);
   
   const targetCount = isFull ? 500 : 40;
-  const maxSearchPages = isFull ? 25 : 2; // Increase page limit to account for filtered items
+  const maxSearchPages = isFull ? 5 : 2; // Fetching 5 pages (500 items max) in parallel is sufficient
 
   for (const source of sources) {
     try {
-      console.log(`Fetching from: ${source.name} (Full: ${isFull})...`);
+      console.log(`Fetching in parallel from: ${source.name} (Full: ${isFull})...`);
       
-      // Fetch multiple pages until we hit target or limit
-      for (let page = 1; page <= maxSearchPages; page++) {
-        if (jobs.length >= targetCount) break;
-
-        const response = await axios.get(`${source.baseUrl}&per_page=100&page=${page}`, { 
+      const pagesToFetch = Array.from({ length: maxSearchPages }, (_, i) => i + 1);
+      const fetchPromises = pagesToFetch.map(page => 
+        axios.get(`${source.baseUrl}&per_page=100&page=${page}`, { 
           httpsAgent, 
-          timeout: 40000,
+          timeout: 15000, // 15 seconds timeout per page request
           headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
-        });
-        
-        if (Array.isArray(response.data) && response.data.length > 0) {
-          response.data.forEach((post: any) => {
+        })
+        .then(res => ({ page, data: res.data }))
+        .catch(err => {
+          console.error(`Page ${page} fetch failed:`, err.message);
+          return { page, data: [] };
+        })
+      );
+
+      const results = await Promise.all(fetchPromises);
+      
+      // Sort results by page number to preserve date ordering as much as possible
+      results.sort((a, b) => a.page - b.page);
+
+      for (const result of results) {
+        if (Array.isArray(result.data) && result.data.length > 0) {
+          result.data.forEach((post: any) => {
             if (jobs.length >= targetCount) return;
             const title = post.title?.rendered || "Job Circular";
             const titleText = title.replace(/&#8211;/g, '-').replace(/&#8217;/g, "'").replace(/<\/?[^>]+(>|$)/g, "").trim();
@@ -833,17 +846,11 @@ async function fetchJobsFromWP(isFull: boolean = false) {
             const job = processWpPost(post, source.name, thirtyDaysAgo, today, parseDeadline);
             if (job) jobs.push(job);
           });
-          console.log(`Page ${page} Result: We now have ${jobs.length} valid jobs total.`);
-        } else {
-          break; // No more pages
+          console.log(`Processed Page ${result.page}. Current total valid jobs: ${jobs.length}`);
         }
       }
     } catch (e: any) {
-      if (e.code === 'ECONNABORTED' || e.message?.includes('timeout') || e.message?.includes('aborted')) {
-        console.error(`${source.name} API timed out or aborted.`);
-      } else {
-        console.error(`${source.name} API failed:`, e.response?.status, e.message);
-      }
+      console.error(`${source.name} API overall failed:`, e.message);
     }
   }
 

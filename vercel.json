@@ -1,27 +1,21 @@
 {
   "version": 2,
-  "crons": [
-    {
-      "path": "/api/sync-firebase",
-      "schedule": "0 2 * * *"
-    }
-  ],
   "rewrites": [
     {
-      "source": "/api/sync-firebase",
-      "destination": "/api/sync-firebase.ts"
-    },
-    {
-      "source": "/api/jobs",
-      "destination": "/api/jobs.ts"
+      "source": "/api/(.*)",
+      "destination": "/api/index.ts"
     },
     {
       "source": "/sitemap.xml",
-      "destination": "/api/sitemap.ts"
+      "destination": "/api/index.ts"
+    },
+    {
+      "source": "/news-sitemap.xml",
+      "destination": "/api/index.ts"
     },
     {
       "source": "/robots.txt",
-      "destination": "/api/robots.ts"
+      "destination": "/api/index.ts"
     },
     {
       "source": "/(.*)",
