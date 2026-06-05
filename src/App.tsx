@@ -344,25 +344,23 @@ function FacebookComments({ url }: { url: string }) {
 
 const AdminPanel = ({ 
   onSync, 
-  allJobs,
-  isSyncingFirebase,
+  isRefreshingCache,
   syncMessage
 }: { 
   onSync: (forceFull: boolean) => Promise<void>, 
-  allJobs: Job[],
-  isSyncingFirebase: boolean,
+  isRefreshingCache: boolean,
   syncMessage: { text: string; type: 'success' | 'error' | 'idle' }
 }) => {
   const [password, setPassword] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [filter, setFilter] = useState<'all' | 'new' | 'recently-fetched' | 'expiring' | 'outdated'>('all');
+  const [filter, setFilter] = useState<'all' | 'new' | 'recently-fetched'>('all');
   const [adminJobs, setAdminJobs] = useState<Job[]>([]);
   const [isLoadingJobs, setIsLoadingJobs] = useState(false);
 
   const fetchAdminJobs = async () => {
     setIsLoadingJobs(true);
     try {
-      const resp = await axios.get('/api/jobs?full=true');
+      const resp = await axios.get(`/api/jobs?full=true&admin=true&t=${Date.now()}`);
       if (Array.isArray(resp.data)) {
         setAdminJobs(resp.data);
       }
@@ -375,13 +373,9 @@ const AdminPanel = ({
 
   useEffect(() => {
     if (isAuthenticated) {
-      if (allJobs.length > 0) {
-        setAdminJobs(allJobs);
-      } else {
-        fetchAdminJobs();
-      }
+      fetchAdminJobs();
     }
-  }, [isAuthenticated, allJobs]);
+  }, [isAuthenticated]);
 
   const handleSyncAndRefresh = async () => {
     await onSync(true); // Call the full sync
@@ -398,40 +392,20 @@ const AdminPanel = ({
         deadlineDate = new Date(job.deadlineISO);
       }
 
-      if (filter === 'outdated') {
-        // Deadline is more than 3 months ago
-        if (!deadlineDate || isNaN(deadlineDate.getTime())) return false;
-        const threeMonthsAgo = new Date();
-        threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
-        return deadlineDate < threeMonthsAgo;
-      }
-
-      if (filter === 'expiring') {
-        // Deadline is in next 7 days
-        if (!deadlineDate || isNaN(deadlineDate.getTime())) return false;
-        const sevenDaysFromNow = new Date();
-        sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
-        return deadlineDate >= now && deadlineDate <= sevenDaysFromNow;
-      }
-
       if (filter === 'new') {
-        // Published within last 48 hours
+        // Published today
         if (!job.publishedDate) return false;
         const pubDate = new Date(job.publishedDate);
         if (isNaN(pubDate.getTime())) return false;
-        const twoDaysAgo = new Date();
-        twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
-        return pubDate >= twoDaysAgo;
+        return pubDate.toDateString() === now.toDateString();
       }
       
       if (filter === 'recently-fetched') {
-        // Fetched within last 24 hours
+        // Fetched today
         if (!job.fetchedAt) return false;
         const fetchedDate = new Date(job.fetchedAt);
         if (isNaN(fetchedDate.getTime())) return false;
-        const oneDayAgo = new Date();
-        oneDayAgo.setDate(oneDayAgo.getDate() - 1);
-        return fetchedDate >= oneDayAgo;
+        return fetchedDate.toDateString() === now.toDateString();
       }
 
       return true;
@@ -464,7 +438,7 @@ const AdminPanel = ({
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
           <h2 className="text-lg font-semibold text-slate-700 mb-2">Manual Data Sync</h2>
           <p className="text-sm text-slate-500 mb-4 tracking-wide">
-            Fetch the latest circulars from the source and save them to Firebase. Automatically updates the lists.
+            Fetch the latest circulars from the source and save them to Server RAM Cache. Automatically updates the lists.
           </p>
           {syncMessage.text && (
             <div className={`p-3 mb-4 rounded text-sm font-medium flex items-start gap-2 ${syncMessage.type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
@@ -474,11 +448,11 @@ const AdminPanel = ({
           )}
           <button 
             onClick={handleSyncAndRefresh} 
-            disabled={isSyncingFirebase}
+            disabled={isRefreshingCache}
             className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg shadow-sm hover:bg-blue-700 disabled:opacity-75 disabled:cursor-not-allowed transition-all active:scale-[0.98]"
           >
-            {isSyncingFirebase ? <Loader2 className="animate-spin w-4 h-4" /> : <RefreshCw className="w-4 h-4" />}
-            {isSyncingFirebase ? 'Syncing...' : 'Fetch & Save to Firebase'}
+            {isRefreshingCache ? <Loader2 className="animate-spin w-4 h-4" /> : <RefreshCw className="w-4 h-4" />}
+            {isRefreshingCache ? 'Syncing...' : 'Fetch & Save to RAM Cache'}
           </button>
         </div>
 
@@ -510,12 +484,6 @@ const AdminPanel = ({
             <button onClick={() => setFilter('recently-fetched')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition whitespace-nowrap ${filter === 'recently-fetched' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
               Newly Fetched
             </button>
-            <button onClick={() => setFilter('expiring')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition whitespace-nowrap ${filter === 'expiring' ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
-              Expiring (7 Days)
-            </button>
-            <button onClick={() => setFilter('outdated')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition whitespace-nowrap ${filter === 'outdated' ? 'bg-red-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
-              Outdated
-            </button>
           </div>
         </div>
         
@@ -527,16 +495,17 @@ const AdminPanel = ({
                 <th className="py-3 px-4 text-slate-600 font-medium whitespace-nowrap">Organization</th>
                 <th className="py-3 px-4 text-slate-600 font-medium whitespace-nowrap">Published</th>
                 <th className="py-3 px-4 text-slate-600 font-medium whitespace-nowrap">Deadline</th>
+                <th className="py-3 px-4 text-slate-600 font-medium whitespace-nowrap border-l border-slate-200">Fetched At</th>
               </tr>
             </thead>
             <tbody>
               {isLoadingJobs ? (
                 <tr>
-                  <td colSpan={4} className="py-8 text-center text-slate-500">Loading jobs from Firebase...</td>
+                  <td colSpan={5} className="py-8 text-center text-slate-500">Loading jobs from server cache...</td>
                 </tr>
               ) : filteredJobs.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="py-8 text-center text-slate-500">No jobs found for this filter.</td>
+                  <td colSpan={5} className="py-8 text-center text-slate-500">No jobs found for this filter.</td>
                 </tr>
               ) : (
                 filteredJobs.map((job) => (
@@ -560,6 +529,9 @@ const AdminPanel = ({
                       }`}>
                         {job.deadline || 'N/A'}
                       </span>
+                    </td>
+                    <td className="py-3 px-4 border-l border-slate-100 text-slate-600 text-[11px] whitespace-nowrap">
+                      {job.fetchedAt ? new Date(job.fetchedAt).toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : 'N/A'}
                     </td>
                   </tr>
                 ))
@@ -590,7 +562,7 @@ export default function App() {
   const [jobSummaries, setJobSummaries] = useState<Record<string, { text: string; loading: boolean; error?: string }>>({});
   const [isFirstVisit, setIsFirstVisit] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'updated' | 'up-to-date'>('idle');
-  const [isSyncingFirebase, setIsSyncingFirebase] = useState(false);
+  const [isRefreshingCache, setIsRefreshingCache] = useState(false);
   const [syncMessage, setSyncMessage] = useState<{ text: string; type: 'success' | 'error' | 'idle' }>({ text: '', type: 'idle' });
   const [lastSyncTime, setLastSyncTime] = useState<number | null>(null);
 
@@ -1064,14 +1036,14 @@ export default function App() {
   }, []);
 
   const handleManualSync = async (forceFull: boolean = false) => {
-    if (isSyncingFirebase) return;
-    setIsSyncingFirebase(true);
+    if (isRefreshingCache) return;
+    setIsRefreshingCache(true);
     setSyncMessage({ text: '', type: 'idle' });
     try {
-      const response = await axios.get(`/api/sync-firebase?quick=${forceFull ? 'false' : 'true'}&full=${forceFull ? 'true' : 'false'}`);
+      const response = await axios.get('/api/refresh-cache');
       if (response.data && response.data.success) {
         setSyncMessage({ text: 'সফলভাবে নতুন বিজ্ঞপ্তি আপডেট হয়েছে!', type: 'success' });
-        // Force-refetch jobs list from Firebase
+        // Force-refetch jobs list from Cache
         await fetchJobs(true);
       } else {
         setSyncMessage({ text: `আপডেট ব্যর্থ হয়েছে: ${response.data.error || 'অজানা ত্রুটি'}`, type: 'error' });
@@ -1080,7 +1052,7 @@ export default function App() {
       console.error("Error executing manual sync:", err);
       setSyncMessage({ text: 'সার্ভারের সাথে যোগাযোগ করা যাচ্ছে না।', type: 'error' });
     } finally {
-      setIsSyncingFirebase(false);
+      setIsRefreshingCache(false);
       setTimeout(() => {
         setSyncMessage({ text: '', type: 'idle' });
       }, 5000);
@@ -1192,7 +1164,7 @@ export default function App() {
       return;
     }
 
-    // Background Full Load from Firebase/Server API because cache expired or forced
+    // Background Full Load from Server Cache/WP API because cache expired or forced
     try {
       const timestamp = Date.now();
       const response = await axios.get(`/api/jobs?full=true&t=${timestamp}`);
@@ -1466,8 +1438,7 @@ export default function App() {
       {activePage === 'admin' ? (
         <AdminPanel 
           onSync={handleManualSync} 
-          allJobs={jobs}
-          isSyncingFirebase={isSyncingFirebase} 
+          isRefreshingCache={isRefreshingCache} 
           syncMessage={syncMessage} 
         />
       ) : (

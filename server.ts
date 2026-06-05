@@ -6,47 +6,7 @@ import * as cheerio from 'cheerio';
 import https from 'https';
 import fs from 'fs';
 
-// Initialize Firebase
-import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, getDocs, doc, setDoc, query, orderBy, limit, getDoc, deleteDoc, writeBatch, setLogLevel, where } from 'firebase/firestore';
-
-let firebaseConfig: any;
-let firestoreDatabaseId: string | undefined;
-
-if (process.env.FIREBASE_API_KEY) {
-  firebaseConfig = {
-    apiKey: process.env.FIREBASE_API_KEY,
-    authDomain: process.env.FIREBASE_AUTH_DOMAIN,
-    projectId: process.env.FIREBASE_PROJECT_ID,
-    storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
-    appId: process.env.FIREBASE_APP_ID,
-    measurementId: process.env.FIREBASE_MEASUREMENT_ID || ""
-  };
-  firestoreDatabaseId = process.env.FIREBASE_FIRESTORE_DATABASE_ID;
-} else {
-  const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
-  if (fs.existsSync(configPath)) {
-    const configData = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    firebaseConfig = configData;
-    firestoreDatabaseId = configData.firestoreDatabaseId;
-  } else {
-    // Fallback/No-op placeholder config if nothing is found (prevents crash on build/lint)
-    firebaseConfig = {
-      apiKey: "MOCK_KEY",
-      authDomain: "mock.firebaseapp.com",
-      projectId: "mock-project",
-      storageBucket: "mock.appspot.com",
-      messagingSenderId: "123456789",
-      appId: "1:123:web:123"
-    };
-  }
-}
-
-const firebaseApp = initializeApp(firebaseConfig);
-const db = getFirestore(firebaseApp, firestoreDatabaseId);
-setLogLevel('error'); // Suppress benign GrpcConnection idle stream warnings
-
+// Initialize Cache
 // Slug generation function
 function generateSlug(title: string, orgName?: string | null, fallbackId?: string, wpSlug?: string | null): string {
   const extractEnglish = (text?: string | null) => {
@@ -187,7 +147,8 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
   app.get('/api/jobs', async (req, res) => {
     try {
       const isFull = req.query.full === 'true';
-      const jobs = await fetchLatestJobs(isFull);
+      const isAdmin = req.query.admin === 'true';
+      const jobs = await fetchLatestJobs(isFull, isAdmin);
       res.json(jobs);
     } catch (error) {
       console.error('Error fetching jobs:', error);
@@ -195,16 +156,14 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
     }
   });
 
-  // API Route to manually sync jobs to Firebase
-  app.get('/api/sync-firebase', async (req, res) => {
+  // API Route to manually refresh RAM cache
+  app.get('/api/refresh-cache', async (req, res) => {
     try {
-      const isQuick = req.query.quick === 'true' || req.query.q === '1';
-      const isFull = req.query.full === 'true';
-      const result = await syncJobsToFirebase(isQuick, isFull);
+      const result = await refreshRAMCache();
       res.json(result);
     } catch (error) {
-      console.error('Error syncing:', error);
-      res.status(500).json({ error: 'Failed to sync to Firebase' });
+      console.error('Error refreshing cache:', error);
+      res.status(500).json({ error: 'Failed to refresh cache' });
     }
   });
 
@@ -237,11 +196,11 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
       console.log(`[BST Scheduler] Next daily sync (1:00 PM BST / 7:00 AM UTC) is scheduled in ${hoursToNext} hours.`);
       
       setTimeout(async () => {
-        console.log("[BST Scheduler] It is 1:00 PM BST. Starting scheduled daily sync to Firebase...");
+        console.log("[BST Scheduler] It is 1:00 PM BST. Starting scheduled daily sync to RAM Cache...");
         try {
-          const result = await syncJobsToFirebase(false, true); // Full background sync
+          const result = await refreshRAMCache(); // Full background sync
           console.log("[BST Scheduler] Sync result:", result);
-          await cleanupExpiredJobsFromFirebase();
+          
         } catch (error) {
           console.error("[BST Scheduler] Scheduled sync error:", error);
         }
@@ -846,8 +805,8 @@ async function fetchJobsFromWP(isFull: boolean = false) {
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(today.getDate() - 30);
   
-  const targetCount = isFull ? 100 : 20;
-  const maxSearchPages = isFull ? 4 : 2; // Increase page limit to account for filtered items
+  const targetCount = isFull ? 300 : 40;
+  const maxSearchPages = isFull ? 15 : 2; // Increase page limit to account for filtered items
 
   for (const source of sources) {
     try {
@@ -889,7 +848,7 @@ async function fetchJobsFromWP(isFull: boolean = false) {
   }
 
   if (jobs.length > 0) {
-    const result = jobs.sort((a, b) => new Date(b.publishedDate).getTime() - new Date(a.publishedDate).getTime());
+    const result = jobs;
     if (isFull) {
       cachedJobsFull = result;
       lastFetchFull = Date.now();
@@ -924,7 +883,7 @@ async function fetchJobsFromWP(isFull: boolean = false) {
           imageUrls: [item.thumbnail || item.enclosure?.link || null].filter(Boolean)
         });
       });
-      const result = jobs.sort((a, b) => new Date(b.publishedDate).getTime() - new Date(a.publishedDate).getTime());
+      const result = jobs;
       if (isFull) {
         cachedJobsFull = result;
         lastFetchFull = Date.now();
@@ -963,369 +922,143 @@ async function fetchJobsFromWP(isFull: boolean = false) {
   return fallbackResult;
 }
 
-async function cleanupExpiredJobsFromFirebase() {
-  console.log("Checking for expired jobs (deadline passed by more than 3 months) to delete...");
-  try {
-    const jobsRef = collection(db, 'jobs');
-    // Optimize: Fetch only the 30 oldest jobs (ordered oldest first) instead of a full collection scan which consumes O(N) reads
-    const q = query(jobsRef, orderBy('publishedDate', 'asc'), limit(30));
-    const snapshot = await getDocs(q);
-    const cutoffDate = new Date();
-    cutoffDate.setMonth(cutoffDate.getMonth() - 3); // 3 months ago
-
-    let deletedCount = 0;
-    for (const jobDoc of snapshot.docs) {
-      const data = jobDoc.data();
-      if (data && data.deadlineISO) {
-        const deadlineDate = new Date(data.deadlineISO);
-        if (!isNaN(deadlineDate.getTime()) && deadlineDate < cutoffDate) {
-          console.log(`Auto deleting expired job "${data.title}" (deadline was ${data.deadline}, parsed: ${data.deadlineISO})`);
-          await deleteDoc(doc(db, 'jobs', jobDoc.id));
-          deletedCount++;
-        }
-      }
-    }
-    if (deletedCount > 0) {
-      console.log(`Cleaned up ${deletedCount} expired jobs from Firebase.`);
-    }
-  } catch (error: any) {
-    console.error("Error cleaning up expired jobs from Firebase:", error.message);
-  }
-}
-
-// Server-side RAM cache to protect Firestore from burning through daily free limits
-interface FirestoreCache {
+interface RAMCache {
   jobs: any[];
   timestamp: number;
 }
 
-let cachedLatestJobsFull: FirestoreCache | null = null;
-let cachedLatestJobsBrief: FirestoreCache | null = null;
-const FIRESTORE_CACHE_TTL = 24 * 60 * 60 * 1000; // Cache Firestore queries for 24 hours to save reads
+let cachedLatestJobsFull: RAMCache | null = null;
+let cachedLatestJobsBrief: RAMCache | null = null;
+const RAM_CACHE_TTL = 24 * 60 * 60 * 1000; // Cache Firestore queries for 24 hours to save reads
+
+const singleJobMapCache = new Map<string, { job: any | null, timestamp: number }>();
+const SINGLE_JOB_CACHE_TTL = 1 * 60 * 60 * 1000; // 1 hour buffer
 
 let isSyncing = false;
-async function syncJobsToFirebase(isQuick: boolean = false, isFull: boolean = false) {
-  if (isSyncing) return { message: "Already syncing" };
-  isSyncing = true;
-  console.log(`Starting background sync to Firebase (isQuick: ${isQuick}, isFull: ${isFull})...`);
+async function refreshRAMCache() {
+  console.log("Refreshing RAM Cache from WP API...");
   try {
-    const jobs = await fetchJobsFromWP(isFull); // fetch full or brief jobs based on isFull
-    
-    // Fetch all currently stored jobs in Firestore to construct a local index map.
-    // This allows us to avoid separate per-record `getDoc()` reads and duplicate `setDoc()` writes.
-    let existingJobs: any[] = [];
-    try {
-      existingJobs = await fetchLatestJobs(true);
-    } catch (e: any) {
-      console.warn("Failed to retrieve existing jobs map - syncing directly without diff", e.message);
+    const jobs = await fetchJobsFromWP(true);
+    if (jobs && jobs.length > 0) {
+      cachedLatestJobsFull = { jobs, timestamp: Date.now() };
+      cachedLatestJobsBrief = { jobs: jobs.slice(0, 40), timestamp: Date.now() };
+      console.log("RAM Cache refreshed successfully!");
+      return { success: true, count: jobs.length };
     }
-    
-    const existingJobsMap = new Map<string, any>();
-    if (Array.isArray(existingJobs)) {
-      existingJobs.forEach((j: any) => {
-        if (j && j.id) {
-          existingJobsMap.set(String(j.id), j);
-        }
-      });
-    }
-
-    let syncedCount = 0;
-    let skippedCount = 0;
-    
-    // Check if the newly fetched data is completely identical to the Firestore version.
-    // This avoids performing Firestore custom Write operations on identical existing records, conserving the 20K write quota!
-    const normalizeStr = (s: any) => {
-      if (typeof s !== 'string') return '';
-      return s.trim().replace(/\s+/g, ' ');
-    };
-
-    const isIdentical = (jobA: any, jobB: any) => {
-      return (
-        normalizeStr(jobA.title) === normalizeStr(jobB.title) &&
-        normalizeStr(jobA.organization) === normalizeStr(jobB.organization) &&
-        normalizeStr(jobA.deadline) === normalizeStr(jobB.deadline) &&
-        jobA.publishedDate === jobB.publishedDate &&
-        normalizeStr(jobA.source) === normalizeStr(jobB.source) &&
-        normalizeStr(jobA.link) === normalizeStr(jobB.link) &&
-        normalizeStr(jobA.location) === normalizeStr(jobB.location) &&
-        normalizeStr(jobA.content) === normalizeStr(jobB.content) &&
-        JSON.stringify(jobA.imageUrls || []) === JSON.stringify(jobB.imageUrls || [])
-      );
-    };
-
-    // Write in batch chunk sizes of 200 (Firestore max batch size is 500)
-    const chunkSize = 200;
-    for (let i = 0; i < jobs.length; i += chunkSize) {
-      const chunk = jobs.slice(i, i + chunkSize);
-      const batch = writeBatch(db);
-      let batchSize = 0;
-      
-      chunk.forEach((job) => {
-        const jobIdStr = String(job.id);
-        const existingJob = existingJobsMap.get(jobIdStr);
-        let fetchedAt = new Date().toISOString();
-        
-        if (existingJob) {
-          if (existingJob.fetchedAt) {
-            fetchedAt = existingJob.fetchedAt;
-          } else {
-            fetchedAt = existingJob.publishedDate || new Date().toISOString();
-          }
-
-          // If the data matches perfectly, do not queue a write. We save a write operation!
-          if (isIdentical(job, existingJob)) {
-            skippedCount++;
-            job.fetchedAt = fetchedAt; // Ensure memory object has it
-            return;
-          }
-        }
-
-        job.fetchedAt = fetchedAt; // Ensure memory object has it
-
-        batch.set(doc(db, 'jobs', job.id), {
-          ...job,
-          _syncToken: "BdGovtJobAdminSyncX123"
-        });
-        batchSize++;
-      });
-      
-      if (batchSize > 0) {
-        await batch.commit();
-        syncedCount += batchSize;
-      }
-    }
-    
-    // Upon successful sync, immediately invalidate server memory caches so users see changes instantly
-    cachedLatestJobsFull = null;
-    cachedLatestJobsBrief = null;
-
-    try {
-        console.log("Saving grouped jobs_cache document to save reads...");
-        // Re-fetch local array because it might be out of order?
-        // Actually, the `jobs` variable holds the newest fetched from WP! Wait, but it is from WP. Does WP returns them ordered and clean?
-        // `jobs` is already ordered!
-        const top100 = jobs.slice(0, 100);
-        const top20 = top100.slice(0, 20);
-        
-        await setDoc(doc(db, 'system', 'jobs_cache'), {
-           full: JSON.stringify(top100),
-           brief: JSON.stringify(top20),
-           timestamp: Date.now(),
-           _syncToken: "BdGovtJobAdminSyncX123"
-        });
-        console.log("Successfully saved grouped jobs_cache document!");
-    } catch (e) {
-        console.error("Failed to save grouped jobs_cache document", e);
-    }
-    
-    console.log(`Synced ${syncedCount} jobs to Firebase successfully using writeBatch (Skipped ${skippedCount} unchanged jobs to save writes).`);
-    return { success: true, count: syncedCount, skipped: skippedCount };
-  } catch (error) {
-    if (error && (error as Error).message && (error as Error).message.includes("Quota limit exceeded")) {
-      console.warn("Firebase Quota limit exceeded. Skipping sync until quota resets.");
-      return { success: false, error: "Quota limit exceeded" };
-    }
-    console.error("Error syncing to Firebase:", error);
-    return { success: false, error: (error as Error).message };
-  } finally {
-    isSyncing = false;
+    return { success: false, error: "No jobs fetched" };
+  } catch (error: any) {
+    console.error("Error refreshing RAM cache:", error.message);
+    return { success: false, error: error.message };
   }
 }
 
-async function fetchLatestJobs(isFull: boolean = false) {
+async function fetchLatestJobs(isFull: boolean = false, isAdmin: boolean = false) {
   const now = Date.now();
-  // Serve from memory cache if active and clean to avoid massive Firestore Reads!
-  if (isFull) {
-    if (cachedLatestJobsFull && (now - cachedLatestJobsFull.timestamp < FIRESTORE_CACHE_TTL)) {
-      console.log("Serving full jobs from Server memory cache...");
-      return cachedLatestJobsFull.jobs;
-    }
-  } else {
-    if (cachedLatestJobsBrief && (now - cachedLatestJobsBrief.timestamp < FIRESTORE_CACHE_TTL)) {
-      console.log("Serving brief jobs from Server memory cache...");
-      return cachedLatestJobsBrief.jobs;
-    }
-  }
-
-  try {
-    let jobs = null;
-    try {
-      const cacheSnap = await getDoc(doc(db, 'system', 'jobs_cache'));
-      if (cacheSnap.exists()) {
-        const data = cacheSnap.data();
-        if (isFull && data.full) {
-            jobs = JSON.parse(data.full);
-        } else if (!isFull && data.brief) {
-            jobs = JSON.parse(data.brief);
-        }
-      }
-    } catch (e) {
-      console.warn("Failed to read system jobs_cache document, falling back to query...");
-    }
-
-    if (jobs && Array.isArray(jobs) && jobs.length > 0) {
-      console.log("Served jobs from system jobs_cache document! (1 read)");
-    } else {
-      console.log("Querying jobs collection directly - this costs multiple reads...");
-      const jobsRef = collection(db, 'jobs');
-      const limitCount = isFull ? 100 : 20;
-      const q = query(jobsRef, orderBy('publishedDate', 'desc'), limit(limitCount));
-      const snapshot = await getDocs(q);
-      
-      if (snapshot.empty) {
-        console.log("Firebase is empty, triggering sync in background...");
-        syncJobsToFirebase();
-        return fetchJobsFromWP(isFull);
-      }
-      
-      jobs = snapshot.docs.map(doc => {
-        const data = doc.data();
-        delete data._syncToken;
-        return data;
-      });
-    }
-
-    // Populate server memory caches
+  // Serve from memory cache if active and clean
+  if (!isAdmin) {
     if (isFull) {
-      cachedLatestJobsFull = { jobs, timestamp: now };
+      if (cachedLatestJobsFull && (now - cachedLatestJobsFull.timestamp < RAM_CACHE_TTL)) {
+        console.log("Serving full jobs from Server memory cache...");
+        return cachedLatestJobsFull.jobs;
+      }
     } else {
-      cachedLatestJobsBrief = { jobs, timestamp: now };
+      if (cachedLatestJobsBrief && (now - cachedLatestJobsBrief.timestamp < RAM_CACHE_TTL)) {
+        console.log("Serving brief jobs from Server memory cache...");
+        return cachedLatestJobsBrief.jobs;
+      }
     }
-
-    return jobs;
-  } catch (e: any) {
-    if (e.message && e.message.includes("Quota limit exceeded")) {
-      console.warn("Firebase Quota limit exceeded in fetchLatestJobs. Falling back to WP API.");
-    } else {
-      console.error("Firebase read error in fetchLatestJobs:", e.message);
-    }
-    return fetchJobsFromWP(isFull);
   }
+
+  console.log("Fetching jobs from WP API...");
+  const jobs = await fetchJobsFromWP(isFull);
+  
+  if (!jobs || jobs.length === 0) {
+    return [];
+  }
+
+  // Populate server memory caches
+  if (isFull) {
+    cachedLatestJobsFull = { jobs, timestamp: now };
+  } else {
+    cachedLatestJobsBrief = { jobs, timestamp: now };
+  }
+
+  return jobs;
 }
 
 async function fetchSingleJob(slugOrId: string) {
   const now = Date.now();
-  // 1. Try to fetch from Server RAM cache first to avoid Firestore reads altogether
-  if (cachedLatestJobsFull && (now - cachedLatestJobsFull.timestamp < FIRESTORE_CACHE_TTL)) {
-    const job = cachedLatestJobsFull.jobs.find(j => j.id === slugOrId || j.slug === slugOrId);
-    if (job) {
-      console.log("Found single job in Server RAM Cache!");
+  
+  if (cachedLatestJobsFull && (now - cachedLatestJobsFull.timestamp < RAM_CACHE_TTL)) {
+    const job = cachedLatestJobsFull.jobs.find((j: any) => String(j.id) === String(slugOrId) || j.slug === slugOrId);
+    if (job && job.content) {
       return job;
     }
-  }
-  if (cachedLatestJobsBrief && (now - cachedLatestJobsBrief.timestamp < FIRESTORE_CACHE_TTL)) {
-    const job = cachedLatestJobsBrief.jobs.find(j => j.id === slugOrId || j.slug === slugOrId);
-    if (job) {
-      console.log("Found single job in Server RAM Cache!");
-      return job;
-    }
-  }
-
-  // 2. Perform EXACT document lookup or single-field equality query (takes EXACTLY 1 read instead of 500 reads!)
-  try {
-    const jobsRef = collection(db, 'jobs');
-    const isId = /^\d+$/.test(slugOrId);
-    
-    if (isId) {
-      const docRef = doc(db, 'jobs', slugOrId);
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        delete data._syncToken;
-        return data;
-      }
-    } else {
-      // Direct query by slug with index limit of 1
-      const q = query(jobsRef, where('slug', '==', slugOrId), limit(1));
-      const snapshot = await getDocs(q);
-      if (!snapshot.empty) {
-        const data = snapshot.docs[0].data();
-        delete data._syncToken;
-        return data;
-      }
-    }
-  } catch (e: any) {
-    if (e.message && e.message.includes("Quota limit exceeded")) {
-      console.warn("Firebase Quota limit exceeded in fetchSingleJob. Falling back to cache/WP API.");
-    } else {
-      console.error("Firebase read error in fetchSingleJob:", e.message);
-    }
-  }
-
-  // Check cache first
-  if (cachedJobsFull) {
-    const job = cachedJobsFull.find(j => j.id === slugOrId || j.slug === slugOrId);
-    if (job) return job;
-  }
-
-  // Fetch from WP API
-  try {
-    const isId = /^\d+$/.test(slugOrId);
-    const endpoint = isId
-      ? `https://bdgovtjob.net/wp-json/wp/v2/posts/${slugOrId}?_embed`
-      : `https://bdgovtjob.net/wp-json/wp/v2/posts?slug=${encodeURIComponent(slugOrId)}&_embed`;
-    
-    console.log("Fetching single job from API:", endpoint);
-    const response = await axios.get(endpoint, { timeout: 15000 });
-    const post = isId ? response.data : (Array.isArray(response.data) ? response.data[0] : null);
-    
-    if (post) {
-      const today = new Date();
-      const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(today.getDate() - 30);
-      
-      const parseLib = (str: string) => {
-        // dummy parser returning null to bypass deadline filter, since it's a specific requested post
-        return null; 
-      };
-
-      const job = processWpPost(post, 'BD Govt Job', thirtyDaysAgo, today, parseLib);
-      if (job) return job;
-    }
-  } catch (e: any) {
-    console.error("Failed to fetch single job from API:", e.message);
   }
   
+  if (cachedLatestJobsBrief && (now - cachedLatestJobsBrief.timestamp < RAM_CACHE_TTL)) {
+    const job = cachedLatestJobsBrief.jobs.find((j: any) => String(j.id) === String(slugOrId) || j.slug === slugOrId);
+    if (job && job.content) {
+      return job;
+    }
+  }
+
+  if (singleJobMapCache.has(slugOrId)) {
+    const cachedItem = singleJobMapCache.get(slugOrId)!;
+    if (now - cachedItem.timestamp < SINGLE_JOB_CACHE_TTL) {
+       return cachedItem.job;
+    } else {
+       singleJobMapCache.delete(slugOrId);
+    }
+  }
+
+  // Fallback to fetch from WP API
+  try {
+    const isId = /^\d+$/.test(slugOrId);
+    let jobData = null;
+    if (!isId) {
+      const resp = await axios.get(`https://bdgovtjob.net/wp-json/wp/v2/posts?slug=${slugOrId}&_embed`, { timeout: 15000 });
+      if (resp.data && resp.data.length > 0) {
+        jobData = resp.data[0];
+      }
+    } else {
+      const resp = await axios.get(`https://bdgovtjob.net/wp-json/wp/v2/posts/${slugOrId}?_embed`, { timeout: 15000 });
+      if (resp.data) {
+        jobData = resp.data;
+      }
+    }
+    
+    if (jobData) {
+      const pubDate = new Date(jobData.date);
+      const rawContent = jobData.content.rendered;
+      const strippedContent = rawContent.replace(/<a\b[^>]*>(.*?)<\/a>/gi, '$1').trim();
+      const imageUrls = [
+          jobData._embedded?.['wp:featuredmedia']?.[0]?.source_url,
+      ].filter(Boolean);
+
+      const parsedJob = {
+          id: jobData.id,
+          title: jobData.title.rendered.replace(/&#8211;/g, '-').replace(/&#8217;/g, "'"),
+          organization: "Job Circular",
+          publishedDate: pubDate.toISOString(),
+          deadline: "See Details", 
+          source: 'General',
+          link: jobData.link,
+          location: 'Bangladesh',
+          content: strippedContent,
+          imageUrls: imageUrls,
+          slug: jobData.slug // Save the slug directly
+      };
+      
+      singleJobMapCache.set(slugOrId, { job: parsedJob, timestamp: now });
+      return parsedJob;
+    }
+  } catch (error) {
+    console.error("Error fetching single job from WP API:", error);
+  }
+
   return null;
 }
 
-function getFallbackJobs() {
-  const today = new Date().toLocaleDateString();
-  return [
-    {
-      id: "f1",
-      slug: generateSlug("Assistant Director (General) - 100 Posts"),
-      title: "Assistant Director (General) - 100 Posts",
-      organization: "Bangladesh Bank",
-      publishedDate: today,
-      deadline: "May 25, 2026",
-      source: "Bank",
-      link: "https://bdgovtjob.net/",
-      location: "Dhaka"
-    },
-    {
-      id: "f2",
-      slug: generateSlug("Senior Officer (Circular No. 2026/04)"),
-      title: "Senior Officer (Circular No. 2026/04)",
-      organization: "Sonali Bank PLC",
-      publishedDate: today,
-      deadline: "May 20, 2026",
-      source: "Bank",
-      link: "https://bdgovtjob.net/",
-      location: "Nationwide"
-    },
-    {
-      id: "f3",
-      slug: generateSlug("Railway Assistant Station Master"),
-      title: "Railway Assistant Station Master",
-      organization: "Bangladesh Railway",
-      publishedDate: today,
-      deadline: "June 10, 2026",
-      source: "Government",
-      link: "https://bdgovtjob.net/",
-      location: "Regional"
-    }
-  ];
-}
-
 startServer();
+

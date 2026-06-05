@@ -22,8 +22,6 @@
     "date-fns": "^4.1.0",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
-    "firebase": "^12.14.0",
-    "firebase-admin": "^13.10.0",
     "framer-motion": "^12.38.0",
     "idb-keyval": "^6.2.4",
     "lucide-react": "^0.546.0",
