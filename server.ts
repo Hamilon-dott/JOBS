@@ -5,6 +5,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import https from 'https';
 import fs from 'fs';
+import fallbackJobs from './public/fallback_jobs.json';
 
 // Initialize Cache
 // Slug generation function
@@ -906,33 +907,20 @@ async function fetchJobsFromWP(isFull: boolean = false) {
 
   // Load from static local JSON file fetched at build-time or saved locally
   try {
-    const srcFallbackPath = path.join(process.cwd(), 'src', 'fallback_jobs.json');
-    const distFallbackPath = path.join(process.cwd(), 'fallback_jobs.json');
-    let fallbackPath = null;
-    if (fs.existsSync(srcFallbackPath)) {
-      fallbackPath = srcFallbackPath;
-    } else if (fs.existsSync(distFallbackPath)) {
-      fallbackPath = distFallbackPath;
-    }
-
-    if (fallbackPath) {
-      const dataStr = fs.readFileSync(fallbackPath, 'utf8');
-      const staticJobs = JSON.parse(dataStr);
-      if (Array.isArray(staticJobs) && staticJobs.length > 0) {
-        console.log(`Loaded ${staticJobs.length} static fallback/cached jobs from JSON.`);
-        const resultList = isFull ? staticJobs : staticJobs.slice(0, 40);
-        if (isFull) {
-          cachedJobsFull = resultList;
-          lastFetchFull = Date.now();
-        } else {
-          cachedJobsBrief = resultList;
-          lastFetchBrief = Date.now();
-        }
-        return resultList;
+    if (Array.isArray(fallbackJobs) && fallbackJobs.length > 0) {
+      console.log(`Loaded ${fallbackJobs.length} static fallback/cached jobs from imported JSON module.`);
+      const resultList = isFull ? fallbackJobs : fallbackJobs.slice(0, 40);
+      if (isFull) {
+        cachedJobsFull = resultList;
+        lastFetchFull = Date.now();
+      } else {
+        cachedJobsBrief = resultList;
+        lastFetchBrief = Date.now();
       }
+      return resultList;
     }
   } catch (err: any) {
-    console.error("Failed to load local fallback_jobs.json:", err.message);
+    console.error("Failed to load imported fallback_jobs.json:", err.message);
   }
 
   const todayDate = new Date().toISOString();
