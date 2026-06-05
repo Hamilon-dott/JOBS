@@ -1354,7 +1354,10 @@ export default function App() {
     return list;
   };
 
-  const paginatedJobs = getProcessedJobs();
+  const processedJobs = getProcessedJobs();
+  const totalPages = Math.ceil(processedJobs.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const paginatedJobs = processedJobs.slice(startIndex, startIndex + itemsPerPage);
 
   // Effects to reset page when filters change
   useEffect(() => {
@@ -1857,7 +1860,7 @@ export default function App() {
                 )}
               </div>
               <div className="flex items-center gap-2 text-[14px] text-[#64748b] font-medium bg-slate-100 px-3 py-1 rounded-full self-start sm:self-center">
-                {toBengaliNumber(paginatedJobs.length)} টি সার্কুলার পাওয়া গেছে
+                {toBengaliNumber(processedJobs.length)} টি সার্কুলার পাওয়া গেছে
               </div>
             </div>
 
@@ -2046,6 +2049,76 @@ export default function App() {
                 )}
               </AnimatePresence>
             </div>
+
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="flex flex-wrap items-center justify-center gap-2 mt-8 py-6 px-2 border-t border-slate-100">
+                <button
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  disabled={currentPage === 1}
+                  className={cn(
+                    "px-3 py-1.5 rounded-lg border text-sm font-medium transition-all flex items-center gap-1 cursor-pointer select-none",
+                    currentPage === 1 
+                      ? "border-slate-100 text-slate-300 pointer-events-none" 
+                      : "border-[#e2e8f0] text-[#475569] bg-white hover:border-[#3b82f6] hover:text-[#3b82f6]"
+                  )}
+                >
+                  <ChevronLeft size={16} />
+                  <span>পূর্ববর্তী</span>
+                </button>
+                
+                <div className="flex items-center gap-1.5">
+                  {Array.from({ length: totalPages }, (_, i) => i + 1)
+                    .filter(page => {
+                      // Show first page, last page, and pages close to current page
+                      return page === 1 || page === totalPages || Math.abs(page - currentPage) <= 1;
+                    })
+                    .map((page, index, array) => {
+                      const elements = [];
+                      
+                      // Check if we need to insert an ellipsis
+                      if (index > 0 && page - array[index - 1] > 1) {
+                        elements.push(
+                          <span key={`ellipsis-${page}`} className="px-2 text-slate-400 select-none">
+                            ...
+                          </span>
+                        );
+                      }
+                      
+                      elements.push(
+                        <button
+                          key={page}
+                          onClick={() => setCurrentPage(page)}
+                          className={cn(
+                            "w-9 h-9 rounded-lg border text-sm font-bold transition-all flex items-center justify-center cursor-pointer select-none",
+                            currentPage === page
+                              ? "bg-[#3b82f6] border-[#3b82f6] text-white shadow-sm shadow-[#3b82f6]/20"
+                              : "border-[#e2e8f0] text-[#475569] bg-white hover:border-[#3b82f6] hover:text-[#3b82f6]"
+                          )}
+                        >
+                          {toBengaliNumber(page)}
+                        </button>
+                      );
+                      
+                      return elements;
+                    })}
+                </div>
+
+                <button
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                  disabled={currentPage === totalPages}
+                  className={cn(
+                    "px-3 py-1.5 rounded-lg border text-sm font-medium transition-all flex items-center gap-1 cursor-pointer select-none",
+                    currentPage === totalPages
+                      ? "border-slate-100 text-slate-300 pointer-events-none" 
+                      : "border-[#e2e8f0] text-[#475569] bg-white hover:border-[#3b82f6] hover:text-[#3b82f6]"
+                  )}
+                >
+                  <span>পরবর্তী</span>
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            )}
 
             {/* Footer */}
             <footer className="mt-8 py-8 text-center text-slate-500 border-t border-slate-200">

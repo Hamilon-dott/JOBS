@@ -785,6 +785,20 @@ let cachedJobsBrief: any[] | null = null;
 let lastFetchBrief: number = 0;
 const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 
+function mergeWithFallbackJobs(retrievedJobs: any[]): any[] {
+  const merged = [...retrievedJobs];
+  if (Array.isArray(fallbackJobs)) {
+    fallbackJobs.forEach((fbJob: any) => {
+      const titleLower = fbJob.title.toLowerCase().trim();
+      const exists = merged.some((j: any) => j.title.toLowerCase().trim() === titleLower || j.slug === fbJob.slug || String(j.id) === String(fbJob.id));
+      if (!exists) {
+        merged.push(fbJob);
+      }
+    });
+  }
+  return merged;
+}
+
 async function fetchJobsFromWP(isFull: boolean = false) {
   const now = Date.now();
   if (isFull) {
@@ -809,8 +823,8 @@ async function fetchJobsFromWP(isFull: boolean = false) {
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(today.getDate() - 60);
   
-  const targetCount = isFull ? 500 : 40;
-  const maxSearchPages = isFull ? 5 : 2; // Fetching 5 pages (500 items max) in parallel is sufficient
+  const targetCount = isFull ? 500 : 350;
+  const maxSearchPages = isFull ? 5 : 4; // Fetching 5 pages (500 items max) in parallel is sufficient
 
   for (const source of sources) {
     try {
@@ -856,7 +870,7 @@ async function fetchJobsFromWP(isFull: boolean = false) {
   }
 
   if (jobs.length > 0) {
-    const result = jobs;
+    const result = mergeWithFallbackJobs(jobs);
     if (isFull) {
       cachedJobsFull = result;
       lastFetchFull = Date.now();
@@ -891,7 +905,7 @@ async function fetchJobsFromWP(isFull: boolean = false) {
           imageUrls: [item.thumbnail || item.enclosure?.link || null].filter(Boolean)
         });
       });
-      const result = jobs;
+      const result = mergeWithFallbackJobs(jobs);
       if (isFull) {
         cachedJobsFull = result;
         lastFetchFull = Date.now();
@@ -909,7 +923,7 @@ async function fetchJobsFromWP(isFull: boolean = false) {
   try {
     if (Array.isArray(fallbackJobs) && fallbackJobs.length > 0) {
       console.log(`Loaded ${fallbackJobs.length} static fallback/cached jobs from imported JSON module.`);
-      const resultList = isFull ? fallbackJobs : fallbackJobs.slice(0, 40);
+      const resultList = fallbackJobs;
       if (isFull) {
         cachedJobsFull = resultList;
         lastFetchFull = Date.now();
