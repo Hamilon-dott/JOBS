@@ -834,7 +834,7 @@ async function fetchJobsFromWP(isFull: boolean = false) {
       const fetchPromises = pagesToFetch.map(page => 
         axios.get(`${source.baseUrl}&per_page=100&page=${page}`, { 
           httpsAgent, 
-          timeout: 2500, // 2.5 seconds timeout per page request
+          timeout: 15000, // 15 seconds timeout per page request to avoid slow server timeouts
           headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
         })
         .then(res => ({ page, data: res.data }))
@@ -886,7 +886,7 @@ async function fetchJobsFromWP(isFull: boolean = false) {
   try {
     const rssUrl = 'https://bdgovtjob.net/feed/';
     console.log("Attempting RSS fallback...");
-    const response = await axios.get(`https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(rssUrl)}`, { timeout: 2000 });
+    const response = await axios.get(`https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(rssUrl)}`, { timeout: 8000 });
     if (response.data?.status === 'ok' && Array.isArray(response.data.items)) {
       response.data.items.forEach((item: any, i: number) => {
         const rawContent = item.content || item.description || "";
@@ -1057,12 +1057,12 @@ async function fetchSingleJob(slugOrId: string) {
     const isId = /^\d+$/.test(slugOrId);
     let jobData = null;
     if (!isId) {
-      const resp = await axios.get(`https://bdgovtjob.net/wp-json/wp/v2/posts?slug=${slugOrId}&_embed`, { timeout: 3000 });
+      const resp = await axios.get(`https://bdgovtjob.net/wp-json/wp/v2/posts?slug=${slugOrId}&_embed`, { timeout: 12000 });
       if (resp.data && resp.data.length > 0) {
         jobData = resp.data[0];
       }
     } else {
-      const resp = await axios.get(`https://bdgovtjob.net/wp-json/wp/v2/posts/${slugOrId}?_embed`, { timeout: 3000 });
+      const resp = await axios.get(`https://bdgovtjob.net/wp-json/wp/v2/posts/${slugOrId}?_embed`, { timeout: 12000 });
       if (resp.data) {
         jobData = resp.data;
       }
