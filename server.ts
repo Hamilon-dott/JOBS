@@ -6,8 +6,18 @@ import https from 'https';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+let localDirname = '';
+try {
+  if (typeof import.meta !== 'undefined' && import.meta.url) {
+    localDirname = path.dirname(fileURLToPath(import.meta.url));
+  }
+} catch (err) {
+  // ignore
+}
+if (!localDirname) {
+  // In CommonJS environment, standard global __dirname is used
+  localDirname = typeof __dirname !== 'undefined' ? __dirname : process.cwd();
+}
 
 // Initialize Cache
 // Slug generation function
@@ -792,24 +802,44 @@ const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 let fallbackJobsCache: any[] | null = null;
 function getFallbackJobs(): any[] {
   if (fallbackJobsCache) return fallbackJobsCache;
-  const pathsText = [
-    path.join(process.cwd(), 'public', 'fallback_jobs.json'),
-    path.join(process.cwd(), 'fallback_jobs.json'),
-    path.join(__dirname, '..', 'public', 'fallback_jobs.json'),
-    path.join(__dirname, 'public', 'fallback_jobs.json')
-  ];
-  for (const p of pathsText) {
-    try {
-      if (fs.existsSync(p)) {
-        const data = fs.readFileSync(p, 'utf8');
-        fallbackJobsCache = JSON.parse(data);
-        console.log(`Successfully loaded ${fallbackJobsCache?.length} fallback jobs dynamically from: ${p}`);
-        return fallbackJobsCache || [];
-      }
-    } catch (err: any) {
-      console.error(`Error reading cached json at ${p}:`, err.message);
+  
+  // Statically analyzable paths so Vercel's Node File Trace (NFT) bundles the file
+  try {
+    const p1 = path.join(localDirname, '..', 'public', 'fallback_jobs.json');
+    if (fs.existsSync(p1)) {
+      const data = fs.readFileSync(p1, 'utf8');
+      fallbackJobsCache = JSON.parse(data);
+      console.log(`Successfully loaded ${fallbackJobsCache?.length} fallback jobs from p1: ${p1}`);
+      return fallbackJobsCache || [];
     }
+  } catch (err: any) {
+    console.warn('p1 fallback read error:', err.message);
   }
+
+  try {
+    const p2 = path.join(localDirname, 'public', 'fallback_jobs.json');
+    if (fs.existsSync(p2)) {
+      const data = fs.readFileSync(p2, 'utf8');
+      fallbackJobsCache = JSON.parse(data);
+      console.log(`Successfully loaded ${fallbackJobsCache?.length} fallback jobs from p2: ${p2}`);
+      return fallbackJobsCache || [];
+    }
+  } catch (err: any) {
+    console.warn('p2 fallback read error:', err.message);
+  }
+
+  try {
+    const p3 = path.join(process.cwd(), 'public', 'fallback_jobs.json');
+    if (fs.existsSync(p3)) {
+      const data = fs.readFileSync(p3, 'utf8');
+      fallbackJobsCache = JSON.parse(data);
+      console.log(`Successfully loaded ${fallbackJobsCache?.length} fallback jobs from p3: ${p3}`);
+      return fallbackJobsCache || [];
+    }
+  } catch (err: any) {
+    console.warn('p3 fallback read error:', err.message);
+  }
+
   return [];
 }
 
