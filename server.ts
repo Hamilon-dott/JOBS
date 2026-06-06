@@ -5,6 +5,7 @@ import * as cheerio from 'cheerio';
 import https from 'https';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import fallbackJobsJson from './public/fallback_jobs.json';
 
 let localDirname = '';
 try {
@@ -799,48 +800,8 @@ let cachedJobsBrief: any[] | null = null;
 let lastFetchBrief: number = 0;
 const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 
-let fallbackJobsCache: any[] | null = null;
 function getFallbackJobs(): any[] {
-  if (fallbackJobsCache) return fallbackJobsCache;
-  
-  // Statically analyzable paths so Vercel's Node File Trace (NFT) bundles the file
-  try {
-    const p1 = path.join(localDirname, '..', 'public', 'fallback_jobs.json');
-    if (fs.existsSync(p1)) {
-      const data = fs.readFileSync(p1, 'utf8');
-      fallbackJobsCache = JSON.parse(data);
-      console.log(`Successfully loaded ${fallbackJobsCache?.length} fallback jobs from p1: ${p1}`);
-      return fallbackJobsCache || [];
-    }
-  } catch (err: any) {
-    console.warn('p1 fallback read error:', err.message);
-  }
-
-  try {
-    const p2 = path.join(localDirname, 'public', 'fallback_jobs.json');
-    if (fs.existsSync(p2)) {
-      const data = fs.readFileSync(p2, 'utf8');
-      fallbackJobsCache = JSON.parse(data);
-      console.log(`Successfully loaded ${fallbackJobsCache?.length} fallback jobs from p2: ${p2}`);
-      return fallbackJobsCache || [];
-    }
-  } catch (err: any) {
-    console.warn('p2 fallback read error:', err.message);
-  }
-
-  try {
-    const p3 = path.join(process.cwd(), 'public', 'fallback_jobs.json');
-    if (fs.existsSync(p3)) {
-      const data = fs.readFileSync(p3, 'utf8');
-      fallbackJobsCache = JSON.parse(data);
-      console.log(`Successfully loaded ${fallbackJobsCache?.length} fallback jobs from p3: ${p3}`);
-      return fallbackJobsCache || [];
-    }
-  } catch (err: any) {
-    console.warn('p3 fallback read error:', err.message);
-  }
-
-  return [];
+  return fallbackJobsJson || [];
 }
 
 function mergeWithFallbackJobs(retrievedJobs: any[]): any[] {
