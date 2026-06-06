@@ -1059,3 +1059,5 @@ async function fetchSingleJob(slugOrId: string) {
 
   return null;
 }
+
+startServer();
