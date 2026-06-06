@@ -1059,15 +1059,7 @@ export default function App() {
     }
   };
 
-  const getFallbackJobs = async () => {
-    try {
-      const resp = await axios.get('/fallback_jobs.json');
-      if (Array.isArray(resp.data) && resp.data.length > 0) {
-        return resp.data;
-      }
-    } catch (e) {
-      console.warn("Failed static asset fallback jobs read:", e);
-    }
+  const getFallbackJobs = () => {
     const today = new Date().toLocaleDateString();
     return [
       {
@@ -1148,12 +1140,10 @@ export default function App() {
     }
 
     const now = Date.now();
-    // Check if the cache has enough items. If it's too small (remnant of old firebase limit), we force an update.
-    const isCacheTooSmall = cachedJobs.length < 25;
-    // Check if the cache is still valid (less than 1 hour old for fresh updates) and has enough jobs
-    const isCacheValid = cachedSyncTime && (now - cachedSyncTime) < 1 * 60 * 60 * 1000 && !isCacheTooSmall;
+    // Check if the cache is still valid (less than 24 hours old) and not forced
+    const isCacheValid = cachedSyncTime && (now - cachedSyncTime) < 24 * 60 * 60 * 1000;
     
-    let shouldCheckForUpdates = force || isCacheTooSmall;
+    let shouldCheckForUpdates = force;
 
     if (!hasCachedData) {
       setLoading(true);
@@ -1231,18 +1221,12 @@ export default function App() {
           setUpdateStatus('idle');
         }
       } else {
-        if (hasCachedData) {
-          setUpdateStatus('idle');
-        } else {
-          const fallback = await getFallbackJobs();
-          setJobs(fallback);
-        }
+        if (hasCachedData) setUpdateStatus('idle');
       }
     } catch (error) {
       console.error('Failed to fetch jobs:', error);
       if (!hasCachedData) {
-        const fallback = await getFallbackJobs();
-        setJobs(fallback);
+        setJobs(getFallbackJobs());
       }
       setUpdateStatus('idle');
     } finally {
@@ -1325,39 +1309,7 @@ export default function App() {
     return matchesSearch && matchesFilter;
   });
 
-  // Pin the most recent "সাপ্তাহিক চাকরির খবর পত্রিকা" matching post to the top of the list
-  const getProcessedJobs = () => {
-    let list = [...filteredJobs];
-    const weeklyJobs = jobs.filter(j => 
-      j.title.includes('সাপ্তাহিক') && (j.title.includes('চাকরি') || j.title.includes('খবর') || j.title.includes('ডাক') || j.title.includes('পত্রিকা'))
-    );
-    
-    if (weeklyJobs.length > 0) {
-      // Find the single absolute most recent weekly job post
-      weeklyJobs.sort((a, b) => new Date(b.publishedDate).getTime() - new Date(a.publishedDate).getTime());
-      const targetWeeklyJob = weeklyJobs[0];
-      
-      // Remove it from the current list position if it exists there to avoid duplication
-      list = list.filter(j => String(j.id) !== String(targetWeeklyJob.id));
-      
-      // Determine if we should pin it.
-      // Pin to the dynamic first position if:
-      // 1. It is already matched by active search/category filters, OR
-      // 2. The user is in general (search-less/default) categories view where we want to highlight it.
-      const isGeneralView = activeFilter === 'All' && !searchTerm && filterCategory === 'সকল ক্যাটাগরি' && filterDeadline === 'যেকোনো সময়সীমা' && filterPublishDate === 'যেকোনো প্রকাশের তারিখ';
-      const isInitiallyMatched = filteredJobs.some(j => String(j.id) === String(targetWeeklyJob.id));
-      
-      if (isInitiallyMatched || isGeneralView) {
-        list.unshift(targetWeeklyJob);
-      }
-    }
-    return list;
-  };
-
-  const processedJobs = getProcessedJobs();
-  const totalPages = Math.ceil(processedJobs.length / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const paginatedJobs = processedJobs.slice(startIndex, startIndex + itemsPerPage);
+  const paginatedJobs = filteredJobs;
 
   // Effects to reset page when filters change
   useEffect(() => {
@@ -1860,7 +1812,7 @@ export default function App() {
                 )}
               </div>
               <div className="flex items-center gap-2 text-[14px] text-[#64748b] font-medium bg-slate-100 px-3 py-1 rounded-full self-start sm:self-center">
-                {toBengaliNumber(processedJobs.length)} টি সার্কুলার পাওয়া গেছে
+                {toBengaliNumber(filteredJobs.length)} টি সার্কুলার পাওয়া গেছে
               </div>
             </div>
 
@@ -2049,76 +2001,6 @@ export default function App() {
                 )}
               </AnimatePresence>
             </div>
-
-            {/* Pagination Controls */}
-            {totalPages > 1 && (
-              <div className="flex flex-wrap items-center justify-center gap-2 mt-8 py-6 px-2 border-t border-slate-100">
-                <button
-                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                  disabled={currentPage === 1}
-                  className={cn(
-                    "px-3 py-1.5 rounded-lg border text-sm font-medium transition-all flex items-center gap-1 cursor-pointer select-none",
-                    currentPage === 1 
-                      ? "border-slate-100 text-slate-300 pointer-events-none" 
-                      : "border-[#e2e8f0] text-[#475569] bg-white hover:border-[#3b82f6] hover:text-[#3b82f6]"
-                  )}
-                >
-                  <ChevronLeft size={16} />
-                  <span>পূর্ববর্তী</span>
-                </button>
-                
-                <div className="flex items-center gap-1.5">
-                  {Array.from({ length: totalPages }, (_, i) => i + 1)
-                    .filter(page => {
-                      // Show first page, last page, and pages close to current page
-                      return page === 1 || page === totalPages || Math.abs(page - currentPage) <= 1;
-                    })
-                    .map((page, index, array) => {
-                      const elements = [];
-                      
-                      // Check if we need to insert an ellipsis
-                      if (index > 0 && page - array[index - 1] > 1) {
-                        elements.push(
-                          <span key={`ellipsis-${page}`} className="px-2 text-slate-400 select-none">
-                            ...
-                          </span>
-                        );
-                      }
-                      
-                      elements.push(
-                        <button
-                          key={page}
-                          onClick={() => setCurrentPage(page)}
-                          className={cn(
-                            "w-9 h-9 rounded-lg border text-sm font-bold transition-all flex items-center justify-center cursor-pointer select-none",
-                            currentPage === page
-                              ? "bg-[#3b82f6] border-[#3b82f6] text-white shadow-sm shadow-[#3b82f6]/20"
-                              : "border-[#e2e8f0] text-[#475569] bg-white hover:border-[#3b82f6] hover:text-[#3b82f6]"
-                          )}
-                        >
-                          {toBengaliNumber(page)}
-                        </button>
-                      );
-                      
-                      return elements;
-                    })}
-                </div>
-
-                <button
-                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                  disabled={currentPage === totalPages}
-                  className={cn(
-                    "px-3 py-1.5 rounded-lg border text-sm font-medium transition-all flex items-center gap-1 cursor-pointer select-none",
-                    currentPage === totalPages
-                      ? "border-slate-100 text-slate-300 pointer-events-none" 
-                      : "border-[#e2e8f0] text-[#475569] bg-white hover:border-[#3b82f6] hover:text-[#3b82f6]"
-                  )}
-                >
-                  <span>পরবর্তী</span>
-                  <ChevronRight size={16} />
-                </button>
-              </div>
-            )}
 
             {/* Footer */}
             <footer className="mt-8 py-8 text-center text-slate-500 border-t border-slate-200">

@@ -6,7 +6,7 @@ import * as cheerio from 'cheerio';
 import https from 'https';
 import fs from 'fs';
 
-// Initialize Cache
+// Initialize Firebase
 // Slug generation function
 function generateSlug(title: string, orgName?: string | null, fallbackId?: string, wpSlug?: string | null): string {
   const extractEnglish = (text?: string | null) => {
@@ -156,14 +156,16 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
     }
   });
 
-  // API Route to manually refresh RAM cache
-  app.get('/api/refresh-cache', async (req, res) => {
+  // API Route to manually sync jobs to Firebase
+  app.get('/api/sync-firebase', async (req, res) => {
     try {
-      const result = await refreshRAMCache();
+      const isQuick = req.query.quick === 'true' || req.query.q === '1';
+      const isFull = req.query.full === 'true';
+      const result = await syncJobsToFirebase(isQuick, isFull);
       res.json(result);
     } catch (error) {
-      console.error('Error refreshing cache:', error);
-      res.status(500).json({ error: 'Failed to refresh cache' });
+      console.error('Error syncing:', error);
+      res.status(500).json({ error: 'Failed to sync to Firebase' });
     }
   });
 
@@ -196,9 +198,9 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
       console.log(`[BST Scheduler] Next daily sync (1:00 PM BST / 7:00 AM UTC) is scheduled in ${hoursToNext} hours.`);
       
       setTimeout(async () => {
-        console.log("[BST Scheduler] It is 1:00 PM BST. Starting scheduled daily sync to RAM Cache...");
+        console.log("[BST Scheduler] It is 1:00 PM BST. Starting scheduled daily sync to Firebase...");
         try {
-          const result = await refreshRAMCache(); // Full background sync
+          const result = await refreshRAMCache();
           console.log("[BST Scheduler] Sync result:", result);
           
         } catch (error) {
@@ -922,13 +924,13 @@ async function fetchJobsFromWP(isFull: boolean = false) {
   return fallbackResult;
 }
 
-interface RAMCache {
+interface FirestoreCache {
   jobs: any[];
   timestamp: number;
 }
 
-let cachedLatestJobsFull: RAMCache | null = null;
-let cachedLatestJobsBrief: RAMCache | null = null;
+let cachedLatestJobsFull: FirestoreCache | null = null;
+let cachedLatestJobsBrief: FirestoreCache | null = null;
 const RAM_CACHE_TTL = 24 * 60 * 60 * 1000; // Cache Firestore queries for 24 hours to save reads
 
 const singleJobMapCache = new Map<string, { job: any | null, timestamp: number }>();
@@ -954,7 +956,7 @@ async function refreshRAMCache() {
 
 async function fetchLatestJobs(isFull: boolean = false, isAdmin: boolean = false) {
   const now = Date.now();
-  // Serve from memory cache if active and clean
+  // Serve from memory cache if active and clean to avoid massive Firestore Reads!
   if (!isAdmin) {
     if (isFull) {
       if (cachedLatestJobsFull && (now - cachedLatestJobsFull.timestamp < RAM_CACHE_TTL)) {
@@ -969,93 +971,209 @@ async function fetchLatestJobs(isFull: boolean = false, isAdmin: boolean = false
     }
   }
 
-  console.log("Fetching jobs from WP API...");
-  const jobs = await fetchJobsFromWP(isFull);
-  
-  if (!jobs || jobs.length === 0) {
-    return [];
-  }
+  try {
+    let jobs = null;
+    
+    // Always try to read from jobs_cache document first to save reads (1 read vs 300 reads)
+    // admin user also gets this because it's a real Firebase read, just grouped!
+    try {
+      const cacheSnap = await getDoc(doc(db, 'system', 'jobs_cache'));
+      if (cacheSnap.exists()) {
+        const data = cacheSnap.data();
+        if (isFull && data.full) {
+            jobs = JSON.parse(data.full);
+        } else if (!isFull && data.brief) {
+            jobs = JSON.parse(data.brief);
+        }
+      }
+    } catch (e: any) {
+      if (e.message && e.message.toLowerCase().includes('quota')) {
+        console.warn("Quota exceeded reading jobs_cache. Falling back to memory cache if available, or empty.");
+        const fallback = isFull ? cachedLatestJobsFull : cachedLatestJobsBrief;
+        return fallback?.jobs || [];
+      }
+      console.warn("Failed to read system jobs_cache document, falling back to query...", e.message);
+    }
 
-  // Populate server memory caches
-  if (isFull) {
-    cachedLatestJobsFull = { jobs, timestamp: now };
-  } else {
-    cachedLatestJobsBrief = { jobs, timestamp: now };
-  }
+    if (jobs && Array.isArray(jobs) && jobs.length > 0) {
+      console.log("Served jobs from system jobs_cache document! (1 read)");
+    } else {
+      console.log("jobs_cache missing or empty. Skipping massive Firebase direct query. Falling back to WP API...");
+      jobs = await fetchJobsFromWP(isFull);
+      
+      if (!jobs || jobs.length === 0) {
+        return [];
+      }
+    }
 
-  return jobs;
+    // Populate server memory caches
+    if (!isAdmin) {
+      if (isFull) {
+        cachedLatestJobsFull = { jobs, timestamp: now };
+      } else {
+        cachedLatestJobsBrief = { jobs, timestamp: now };
+      }
+    }
+
+    return jobs;
+  } catch (e: any) {
+    if (e.message && e.message.includes("Quota limit exceeded")) {
+      console.warn("Firebase Quota limit exceeded in fetchLatestJobs. Falling back to WP API.");
+    } else {
+      console.error("Firebase read error in fetchLatestJobs:", e.message);
+    }
+    return fetchJobsFromWP(isFull);
+  }
 }
 
 async function fetchSingleJob(slugOrId: string) {
   const now = Date.now();
-  
+  // 1. Try to fetch from Server RAM cache first to avoid Firestore reads altogether
   if (cachedLatestJobsFull && (now - cachedLatestJobsFull.timestamp < RAM_CACHE_TTL)) {
-    const job = cachedLatestJobsFull.jobs.find((j: any) => String(j.id) === String(slugOrId) || j.slug === slugOrId);
+    const job = cachedLatestJobsFull.jobs.find(j => String(j.id) === String(slugOrId) || j.slug === slugOrId);
     if (job && job.content) {
+      console.log("Found single job with content in Server RAM Cache!");
       return job;
     }
   }
-  
   if (cachedLatestJobsBrief && (now - cachedLatestJobsBrief.timestamp < RAM_CACHE_TTL)) {
-    const job = cachedLatestJobsBrief.jobs.find((j: any) => String(j.id) === String(slugOrId) || j.slug === slugOrId);
+    const job = cachedLatestJobsBrief.jobs.find(j => String(j.id) === String(slugOrId) || j.slug === slugOrId);
     if (job && job.content) {
+      console.log("Found single job with content in Server RAM Cache!");
       return job;
     }
   }
 
+  // Check the single item MISS/HIT cache
   if (singleJobMapCache.has(slugOrId)) {
     const cachedItem = singleJobMapCache.get(slugOrId)!;
     if (now - cachedItem.timestamp < SINGLE_JOB_CACHE_TTL) {
+       console.log("Serving single job from MapCache (buffer hit/miss)...");
        return cachedItem.job;
     } else {
        singleJobMapCache.delete(slugOrId);
     }
   }
 
-  // Fallback to fetch from WP API
+  let finalJobData = null;
+
+  // 2. Perform EXACT document lookup or single-field equality query (takes EXACTLY 1 read instead of 500 reads!)
   try {
+    const jobsRef = collection(db, 'jobs');
     const isId = /^\d+$/.test(slugOrId);
-    let jobData = null;
-    if (!isId) {
-      const resp = await axios.get(`https://bdgovtjob.net/wp-json/wp/v2/posts?slug=${slugOrId}&_embed`, { timeout: 15000 });
-      if (resp.data && resp.data.length > 0) {
-        jobData = resp.data[0];
+    
+    if (isId) {
+      const docRef = doc(db, 'jobs', slugOrId);
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        delete data._syncToken;
+        finalJobData = data;
       }
     } else {
-      const resp = await axios.get(`https://bdgovtjob.net/wp-json/wp/v2/posts/${slugOrId}?_embed`, { timeout: 15000 });
-      if (resp.data) {
-        jobData = resp.data;
+      // Direct query by slug with index limit of 1
+      const q = query(jobsRef, where('slug', '==', slugOrId), limit(1));
+      const snapshot = await getDocs(q);
+      if (!snapshot.empty) {
+        const data = snapshot.docs[0].data();
+        delete data._syncToken;
+        finalJobData = data;
       }
     }
-    
-    if (jobData) {
-      const pubDate = new Date(jobData.date);
-      const rawContent = jobData.content.rendered;
-      const strippedContent = rawContent.replace(/<a\b[^>]*>(.*?)<\/a>/gi, '$1').trim();
-      const imageUrls = [
-          jobData._embedded?.['wp:featuredmedia']?.[0]?.source_url,
-      ].filter(Boolean);
-
-      const parsedJob = {
-          id: jobData.id,
-          title: jobData.title.rendered.replace(/&#8211;/g, '-').replace(/&#8217;/g, "'"),
-          organization: "Job Circular",
-          publishedDate: pubDate.toISOString(),
-          deadline: "See Details", 
-          source: 'General',
-          link: jobData.link,
-          location: 'Bangladesh',
-          content: strippedContent,
-          imageUrls: imageUrls,
-          slug: jobData.slug // Save the slug directly
-      };
-      
-      singleJobMapCache.set(slugOrId, { job: parsedJob, timestamp: now });
-      return parsedJob;
+  } catch (e: any) {
+    if (e.message && e.message.includes("Quota limit exceeded")) {
+      console.warn("Firebase Quota limit exceeded in fetchSingleJob. Falling back to cache/WP API.");
+    } else {
+      console.error("Firebase read error in fetchSingleJob:", e.message);
     }
-  } catch (error) {
-    console.error("Error fetching single job from WP API:", error);
   }
 
+  if (finalJobData) {
+    singleJobMapCache.set(slugOrId, { job: finalJobData, timestamp: now });
+    return finalJobData;
+  }
+
+  // Check cache first
+  if (cachedJobsFull) {
+    const job = cachedJobsFull.find(j => j.id === slugOrId || j.slug === slugOrId);
+    if (job) {
+      singleJobMapCache.set(slugOrId, { job: job, timestamp: now });
+      return job;
+    }
+  }
+
+  // Fetch from WP API
+  try {
+    const isId = /^\d+$/.test(slugOrId);
+    const endpoint = isId
+      ? `https://bdgovtjob.net/wp-json/wp/v2/posts/${slugOrId}?_embed`
+      : `https://bdgovtjob.net/wp-json/wp/v2/posts?slug=${encodeURIComponent(slugOrId)}&_embed`;
+    
+    console.log("Fetching single job from API:", endpoint);
+    const response = await axios.get(endpoint, { timeout: 15000 });
+    const post = isId ? response.data : (Array.isArray(response.data) ? response.data[0] : null);
+    
+    if (post) {
+      const today = new Date();
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(today.getDate() - 30);
+      
+      const parseLib = (str: string) => {
+        // dummy parser returning null to bypass deadline filter, since it's a specific requested post
+        return null; 
+      };
+
+      const job = processWpPost(post, 'BD Govt Job', thirtyDaysAgo, today, parseLib);
+      if (job) {
+        singleJobMapCache.set(slugOrId, { job: job, timestamp: now });
+        return job;
+      }
+    }
+  } catch (e: any) {
+    console.error("Failed to fetch single job from API:", e.message);
+  }
+  
+  singleJobMapCache.set(slugOrId, { job: null, timestamp: now });
   return null;
 }
+
+function getFallbackJobs() {
+  const today = new Date().toLocaleDateString();
+  return [
+    {
+      id: "f1",
+      slug: generateSlug("Assistant Director (General) - 100 Posts"),
+      title: "Assistant Director (General) - 100 Posts",
+      organization: "Bangladesh Bank",
+      publishedDate: today,
+      deadline: "May 25, 2026",
+      source: "Bank",
+      link: "https://bdgovtjob.net/",
+      location: "Dhaka"
+    },
+    {
+      id: "f2",
+      slug: generateSlug("Senior Officer (Circular No. 2026/04)"),
+      title: "Senior Officer (Circular No. 2026/04)",
+      organization: "Sonali Bank PLC",
+      publishedDate: today,
+      deadline: "May 20, 2026",
+      source: "Bank",
+      link: "https://bdgovtjob.net/",
+      location: "Nationwide"
+    },
+    {
+      id: "f3",
+      slug: generateSlug("Railway Assistant Station Master"),
+      title: "Railway Assistant Station Master",
+      organization: "Bangladesh Railway",
+      publishedDate: today,
+      deadline: "June 10, 2026",
+      source: "Government",
+      link: "https://bdgovtjob.net/",
+      location: "Regional"
+    }
+  ];
+}
+
+startServer();
