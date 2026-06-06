@@ -1235,12 +1235,19 @@ export default function App() {
     }
   };
 
-  const filteredJobs = jobs.filter(job => {
-    const matchesSearch = job.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          job.organization.toLowerCase().includes(searchTerm.toLowerCase());
-    
+  const searchResults = React.useMemo(() => {
+    if (!searchTerm.trim()) return jobs;
+    const term = searchTerm.toLowerCase().trim();
+    return jobs.filter(job => 
+      (job.title && job.title.toLowerCase().includes(term)) ||
+      (job.organization && job.organization.toLowerCase().includes(term)) ||
+      (job.source && job.source.toLowerCase().includes(term))
+    );
+  }, [searchTerm, jobs]);
+
+  const filteredJobs = searchResults.filter(job => {
     // Check if the source (comma separated) contains the active filter
-    const jobCategories = job.source.split(',').map(s => s.trim());
+    const jobCategories = typeof job.source === 'string' ? job.source.split(',').map(s => s.trim()) : [];
     
     let matchesFilter = activeFilter === 'All' || jobCategories.includes(activeFilter);
     
@@ -1306,7 +1313,7 @@ export default function App() {
       }
     }
     
-    return matchesSearch && matchesFilter;
+    return matchesFilter;
   });
 
   const paginatedJobs = filteredJobs;
@@ -1919,7 +1926,7 @@ export default function App() {
 
                         <div className="flex items-center justify-between md:justify-end gap-4 border-t md:border-none pt-2 md:pt-0">
                           <div className="flex flex-wrap gap-1.5 justify-end">
-                            {job.source.split(',').map((src) => (
+                            {typeof job.source === 'string' && job.source.split(',').map((src) => (
                               <span key={src} className={cn(
                                 "tag px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider",
                                 src === 'Government' 
@@ -2144,7 +2151,7 @@ export default function App() {
                       >
                         <div className="mb-6">
                           <div className="flex flex-wrap gap-2 mb-4">
-                            {selectedJob.source.split(',').map((src) => (
+                            {typeof selectedJob.source === 'string' && selectedJob.source.split(',').map((src) => (
                               <span key={src} className={cn(
                                 "tag px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider",
                                 src === 'Government' 
