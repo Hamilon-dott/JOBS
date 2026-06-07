@@ -41,14 +41,11 @@ function generateSlug(title: string, orgName?: string | null, fallbackId?: strin
   return slug;
 }
 
-async function startServer() {
-  const app = express();
-  const PORT = 3000;
-
-  app.use(express.json());
+const app = express();
+app.use(express.json());
 
   // Robots.txt
-  app.get('/robots.txt', (req, res) => {
+  app.get(['/robots.txt', '/api/robots'], (req, res) => {
     const isLocalhost = (req.get('host') || '').includes('localhost');
     const baseUrl = isLocalhost ? `${req.protocol}://${req.get('host')}` : 'https://jobs.talukdaracademy.com.bd';
     res.type('text/plain');
@@ -62,7 +59,7 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
   });
 
   // News Sitemap.xml for Google News
-  app.get('/news-sitemap.xml', async (req, res) => {
+  app.get(['/news-sitemap.xml', '/api/news-sitemap'], async (req, res) => {
     try {
       const jobs = await fetchLatestJobs(true);
       const host = req.get('host')?.includes('localhost') ? `${req.protocol}://${req.get('host')}` : 'https://jobs.talukdaracademy.com.bd';
@@ -98,7 +95,7 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
   });
 
   // Sitemap.xml
-  app.get('/sitemap.xml', async (req, res) => {
+  app.get(['/sitemap.xml', '/api/sitemap'], async (req, res) => {
     try {
       const jobs = await fetchLatestJobs(true);
       const host = req.get('host')?.includes('localhost') ? `${req.protocol}://${req.get('host')}` : 'https://jobs.talukdaracademy.com.bd';
@@ -167,6 +164,30 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
     }
   });
 
+  app.all('/api/*', async (req, res) => {
+    // If vercel rewrote to `/api/index`, and we didn't catch it in `/api/jobs`, we can catch it here.
+    if (req.url.includes('/api/index') && req.query.full) {
+      try {
+        const isFull = req.query.full === 'true';
+        const isAdmin = req.query.admin === 'true';
+        const jobs = await fetchLatestJobs(isFull, isAdmin);
+        return res.json(jobs);
+      } catch (error) {
+        return res.status(500).json({ error: 'Failed to fetch jobs' });
+      }
+    }
+    
+    // generic fallback to jobs anyway for fixing the vercel bug
+    try {
+        const isFull = req.query.full === 'true';
+        const isAdmin = req.query.admin === 'true';
+        const jobs = await fetchLatestJobs(isFull, isAdmin);
+        return res.json(jobs);
+    } catch(e) {
+        return res.status(500).json({ error: 'Failed to fetch jobs' });
+    }
+  });
+
   // Schedule background sync daily at 1:00 PM Bangladesh Standard Time (BST = UTC+6), i.e., 07:00 AM UTC
   function scheduleDailySyncAtOnePmBST() {
     const getMsUntilNextRun = () => {
@@ -214,6 +235,8 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
 
   scheduleDailySyncAtOnePmBST();
 
+  async function startViteAndListen() {
+  const PORT = 3000;
   // Vite integration
   let vite;
   if (process.env.NODE_ENV !== 'production') {
@@ -467,6 +490,12 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
     console.log(`Server running at http://localhost:${PORT}`);
   });
 }
+
+if (!process.env.VERCEL) {
+  startViteAndListen();
+}
+
+export default app;
 
 const httpsAgent = new https.Agent({  
   rejectUnauthorized: false
@@ -812,17 +841,25 @@ async function fetchJobsFromWP(isFull: boolean = false) {
     try {
       console.log(`Fetching from: ${source.name} (Full: ${isFull})...`);
       
-      // Fetch multiple pages until we hit target or limit
-      for (let page = 1; page <= maxSearchPages; page++) {
-        if (jobs.length >= targetCount) break;
+      const pageRequests = [];
+      const limitPages = isFull ? 5 : 2; 
+      for (let page = 1; page <= limitPages; page++) {
+        pageRequests.push(
+          axios.get(`${source.baseUrl}&per_page=100&page=${page}`, { 
+            httpsAgent, 
+            timeout: 8000,
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+          }).catch(e => {
+            console.error(`Page ${page} failed:`, e.message);
+            return null;
+          })
+        );
+      }
 
-        const response = await axios.get(`${source.baseUrl}&per_page=100&page=${page}`, { 
-          httpsAgent, 
-          timeout: 40000,
-          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
-        });
-        
-        if (Array.isArray(response.data) && response.data.length > 0) {
+      const responses = await Promise.all(pageRequests);
+      
+      for (const response of responses) {
+        if (response && Array.isArray(response.data)) {
           response.data.forEach((post: any) => {
             if (jobs.length >= targetCount) return;
             const title = post.title?.rendered || "Job Circular";
@@ -833,11 +870,9 @@ async function fetchJobsFromWP(isFull: boolean = false) {
             const job = processWpPost(post, source.name, thirtyDaysAgo, today, parseDeadline);
             if (job) jobs.push(job);
           });
-          console.log(`Page ${page} Result: We now have ${jobs.length} valid jobs total.`);
-        } else {
-          break; // No more pages
         }
       }
+      console.log(`Result: We now have ${jobs.length} valid jobs total.`);
     } catch (e: any) {
       if (e.code === 'ECONNABORTED' || e.message?.includes('timeout') || e.message?.includes('aborted')) {
         console.error(`${source.name} API timed out or aborted.`);
@@ -1060,4 +1095,3 @@ async function fetchSingleJob(slugOrId: string) {
   return null;
 }
 
-startServer();

@@ -1,31 +1,9 @@
 {
   "version": 2,
-  "crons": [
-    {
-      "path": "/api/sync-firebase",
-      "schedule": "0 2 * * *"
-    }
-  ],
   "rewrites": [
-    {
-      "source": "/api/sync-firebase",
-      "destination": "/api/sync-firebase.ts"
-    },
-    {
-      "source": "/api/jobs",
-      "destination": "/api/jobs.ts"
-    },
-    {
-      "source": "/sitemap.xml",
-      "destination": "/api/sitemap.ts"
-    },
-    {
-      "source": "/robots.txt",
-      "destination": "/api/robots.ts"
-    },
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
-    }
+    { "source": "/sitemap.xml", "destination": "/api/sitemap" },
+    { "source": "/news-sitemap.xml", "destination": "/api/news-sitemap" },
+    { "source": "/robots.txt", "destination": "/api/robots" },
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
