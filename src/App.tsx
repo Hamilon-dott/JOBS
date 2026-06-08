@@ -269,13 +269,16 @@ const InFeedAdComponent = () => {
   }, []);
 
   return (
-    <ins ref={insRef}
-         className="adsbygoogle"
-         style={{ display: "block" }}
-         data-ad-client="ca-pub-7608093638667157"
-         data-ad-slot="8382578589"
-         data-ad-format="auto"
-         data-full-width-responsive="true"></ins>
+    <div className="w-full relative my-2 pt-4 pb-1">
+      <div className="absolute top-0 left-2 text-[10px] text-slate-400 font-medium tracking-wider uppercase">Advertisement</div>
+      <ins ref={insRef}
+           className="adsbygoogle"
+           style={{ display: "block" }}
+           data-ad-format="fluid"
+           data-ad-layout-key="-fb+5w+4e-db+86"
+           data-ad-client="ca-pub-7608093638667157"
+           data-ad-slot="7997452271"></ins>
+    </div>
   );
 };
 
@@ -311,13 +314,16 @@ const AdComponent = () => {
   }, []);
 
   return (
-    <ins ref={insRef}
-         className="adsbygoogle"
-         style={{ display: "block" }}
-         data-ad-client="ca-pub-7608093638667157"
-         data-ad-slot="8382578589"
-         data-ad-format="auto"
-         data-full-width-responsive="true"></ins>
+    <div className="w-full relative my-4 pt-4 pb-1 flex justify-center">
+      <div className="absolute top-0 left-2 text-[10px] text-slate-400 font-medium tracking-wider uppercase">Advertisement</div>
+      <ins ref={insRef}
+           className="adsbygoogle"
+           style={{ display: "block" }}
+           data-ad-client="ca-pub-7608093638667157"
+           data-ad-slot="8382578589"
+           data-ad-format="auto"
+           data-full-width-responsive="true"></ins>
+    </div>
   );
 };
 
