@@ -948,14 +948,32 @@ export default function App() {
 
   useEffect(() => {
     if (selectedJob) {
-      if (!jobSummaries[selectedJob.id]) {
-        generateSummary(selectedJob);
-      }
-      if (selectedJob.imageUrls && selectedJob.imageUrls.length > 0) {
-        setIsJobDetailLoading(true);
-        setLoadedImagesCount(0);
+      if (!selectedJob.content && !selectedJob.imageUrls) {
+        const fetchFullJob = async () => {
+          setIsJobDetailLoading(true);
+          try {
+            const response = await axios.get(`/api/job/${selectedJob.slug || selectedJob.id}`);
+            if (response.data && response.data.id) {
+              setSelectedJob(prev => prev && (prev.id === selectedJob.id || prev.slug === selectedJob.slug) ? response.data : prev);
+            } else {
+              setIsJobDetailLoading(false);
+            }
+          } catch (e) {
+            console.warn("Failed to fetch full job details", e);
+            setIsJobDetailLoading(false);
+          }
+        };
+        fetchFullJob();
       } else {
-        setIsJobDetailLoading(false);
+        if (!jobSummaries[selectedJob.id]) {
+          generateSummary(selectedJob);
+        }
+        if (selectedJob.imageUrls && selectedJob.imageUrls.length > 0) {
+          setIsJobDetailLoading(true);
+          setLoadedImagesCount(0);
+        } else {
+          setIsJobDetailLoading(false);
+        }
       }
     }
   }, [selectedJob]);
@@ -1309,7 +1327,8 @@ export default function App() {
     return matchesSearch && matchesFilter;
   });
 
-  const paginatedJobs = filteredJobs;
+  const totalPages = Math.ceil(filteredJobs.length / itemsPerPage);
+  const paginatedJobs = filteredJobs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   // Effects to reset page when filters change
   useEffect(() => {
@@ -1329,6 +1348,7 @@ export default function App() {
     setSelectedJob(null);
     setActivePage('home');
   };
+
 
   const categories = ['All', 'Expiring Soon', 'Government', 'Private', 'Bank', 'NGO', 'General'];
   const sourcesCount = new Set(jobs.map(j => j.source)).size;
@@ -2001,6 +2021,50 @@ export default function App() {
                 )}
               </AnimatePresence>
             </div>
+
+            {totalPages > 1 && (
+              <div className="flex justify-center items-center gap-2 mt-8 pb-4">
+                <button 
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="p-2 rounded-lg border border-slate-200 bg-white text-slate-600 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-50 flex items-center justify-center transition-colors"
+                >
+                  <ChevronLeft size={20} />
+                </button>
+                
+                <div className="flex items-center gap-1 overflow-x-auto max-w-[60vw] md:max-w-md px-2 scrollbar-none">
+                  {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
+                    if (page === 1 || page === totalPages || (page >= currentPage - 1 && page <= currentPage + 1)) {
+                      return (
+                        <button
+                          key={page}
+                          onClick={() => setCurrentPage(page)}
+                          className={cn(
+                            "w-10 h-10 flex-shrink-0 rounded-lg text-sm font-medium transition-colors",
+                            currentPage === page 
+                              ? "bg-blue-600 text-white" 
+                              : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"
+                          )}
+                        >
+                          {toBengaliNumber(page)}
+                        </button>
+                      );
+                    } else if (page === currentPage - 2 || page === currentPage + 2) {
+                      return <span key={page} className="text-slate-400 px-1 shrink-0">...</span>;
+                    }
+                    return null;
+                  })}
+                </div>
+
+                <button 
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  className="p-2 rounded-lg border border-slate-200 bg-white text-slate-600 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-50 flex items-center justify-center transition-colors"
+                >
+                  <ChevronRight size={20} />
+                </button>
+              </div>
+            )}
 
             {/* Footer */}
             <footer className="mt-8 py-8 text-center text-slate-500 border-t border-slate-200">

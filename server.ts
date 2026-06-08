@@ -858,7 +858,7 @@ async function fetchJobsFromWP(isFull: boolean = false) {
       for (let page = 1; page <= maxSearchPages; page++) {
         if (jobs.length >= targetCount) break;
 
-        const response = await axios.get(`${source.baseUrl}&per_page=100&page=${page}`, { 
+        const response = await axios.get(`${source.baseUrl}&orderby=modified&per_page=100&page=${page}`, { 
           httpsAgent, 
           timeout: 40000,
           headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
