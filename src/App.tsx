@@ -134,6 +134,19 @@ const isNewJob = (publishedDate?: string): boolean => {
   }
 };
 
+const isWeeklyJobPaper = (title: string): boolean => {
+  if (!title) return false;
+  const lowerTitle = title.toLowerCase();
+  return lowerTitle.includes('সাপ্তাহিক') || 
+         lowerTitle.includes('পত্রিকা') || 
+         lowerTitle.includes('saptahik') || 
+         lowerTitle.includes('weekly') || 
+         lowerTitle.includes('চাকরির ডাক') ||
+         lowerTitle.includes('চাকরির খবর') ||
+         lowerTitle.includes('chakrir dak') ||
+         lowerTitle.includes('chakrir khobor');
+};
+
 const formatRemainingDays = (days: number | null) => {
   if (days === null) return "";
   if (days > 0) return `${toBengaliNumber(days)} দিন বাকি`;
@@ -1284,8 +1297,24 @@ export default function App() {
     return matchesSearch && matchesFilter;
   });
 
-  const totalPages = Math.ceil(filteredJobs.length / itemsPerPage);
-  const paginatedJobs = filteredJobs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  const sortedFilteredJobs = [...filteredJobs].sort((a, b) => {
+    // 1. Weekly Job Papers
+    const aWeekly = isWeeklyJobPaper(a.title);
+    const bWeekly = isWeeklyJobPaper(b.title);
+    if (aWeekly && !bWeekly) return -1;
+    if (!aWeekly && bWeekly) return 1;
+
+    // 2. New Tag (Newly published)
+    const aNew = isNewJob(a.publishedDate);
+    const bNew = isNewJob(b.publishedDate);
+    if (aNew && !bNew) return -1;
+    if (!aNew && bNew) return 1;
+
+    return 0; // Maintain existing order for others (which should be modified date from API)
+  });
+
+  const totalPages = Math.ceil(sortedFilteredJobs.length / itemsPerPage);
+  const paginatedJobs = sortedFilteredJobs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   // Effects to reset page when filters change
   useEffect(() => {
