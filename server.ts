@@ -236,7 +236,8 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
       return res.json({ summary: response.text || '' });
     } catch (error: any) {
       console.error("Failed to generate summary via backend", error);
-      return res.status(500).json({ error: 'Failed to generate summary' });
+      // Fallback summary if API fails due to permission denied or other errors
+      return res.json({ summary: "বিজ্ঞপ্তির সারাংশ তৈরি করা সম্ভব হয়নি (AI generation failed)। অনুগ্রহ করে নিচের বিস্তারিত তথ্য অথবা সার্কুলার ছবিটি দেখুন।" });
     }
   });
 

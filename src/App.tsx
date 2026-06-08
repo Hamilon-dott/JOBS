@@ -1303,12 +1303,24 @@ export default function App() {
     return matchesSearch && matchesFilter;
   });
 
+  // Find the single most recent weekly job paper to pin at the top
+  const mostRecentWeeklyJobId = React.useMemo(() => {
+    const weeklyJobs = jobs.filter(j => isWeeklyJobPaper(j.title));
+    if (weeklyJobs.length === 0) return null;
+    return weeklyJobs.reduce((latest, current) => {
+      const latestDate = new Date(latest.publishedDate).getTime();
+      const currentDate = new Date(current.publishedDate).getTime();
+      return currentDate > latestDate ? current : latest;
+    }).id;
+  }, [jobs]);
+
   const sortedFilteredJobs = [...filteredJobs].sort((a, b) => {
-    // 1. Weekly Job Papers
-    const aWeekly = isWeeklyJobPaper(a.title);
-    const bWeekly = isWeeklyJobPaper(b.title);
-    if (aWeekly && !bWeekly) return -1;
-    if (!aWeekly && bWeekly) return 1;
+    // 1. Weekly Job Papers (Only the most recent one is pinned)
+    const aIsMostRecentWeekly = a.id === mostRecentWeeklyJobId;
+    const bIsMostRecentWeekly = b.id === mostRecentWeeklyJobId;
+
+    if (aIsMostRecentWeekly && !bIsMostRecentWeekly) return -1;
+    if (!aIsMostRecentWeekly && bIsMostRecentWeekly) return 1;
 
     // 2. New Tag (Newly published)
     const aNew = isNewJob(a.publishedDate);
@@ -1529,7 +1541,7 @@ export default function App() {
             <div className="p-6 flex flex-col justify-between h-full bg-[#0f172a] overflow-y-auto custom-scrollbar">
               <div className="flex-1 flex flex-col">
                 <div className="flex items-center justify-between mb-10 selection:bg-none">
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 cursor-pointer" onClick={() => { setActivePage('home'); setSelectedJob(null); setIsSidebarOpen(false); window.scrollTo({top: 0, behavior: 'smooth'}); }}>
                     <div className="bg-[#3b82f6] w-10 h-10 rounded-lg flex items-center justify-center text-white shrink-0">
                       <Briefcase size={20} />
                     </div>
@@ -1634,59 +1646,61 @@ export default function App() {
       {/* Main Content */}
       <main className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
-        <header className="h-[60px] md:h-[72px] bg-white border-b border-[#e2e8f0] flex items-center justify-between px-4 md:px-6 shrink-0 shadow-sm relative z-10">
-          <div className="flex items-center gap-2 md:gap-4">
-            <button 
-              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              className="p-1.5 md:p-2 hover:bg-slate-100 rounded-lg text-slate-600 transition-colors"
-            >
-              <div className="space-y-1 md:space-y-1.5 font-bold">
-                <div className="w-5 md:w-6 h-0.5 bg-current"></div>
-                <div className="w-5 md:w-6 h-0.5 bg-current"></div>
-                <div className="w-5 md:w-6 h-0.5 bg-current"></div>
-              </div>
-            </button>
-            <div className="md:hidden flex items-center">
-              <div className="flex items-center gap-1.5 font-bold text-slate-700">
-                <div className="bg-[#3b82f6] w-7 h-7 rounded-lg flex items-center justify-center text-white">
-                  <Briefcase size={16} />
-                </div>
-                <div className="flex flex-col min-w-0">
-                  <span className="text-[11px] font-black tracking-tighter animate-rgb-glow uppercase whitespace-nowrap">
-                    Jobs.talukdaracademy
-                  </span>
-                  <div className="h-[1px] w-6 bg-blue-400/40 rounded-full" />
-                </div>
-              </div>
-            </div>
-            <div className="hidden md:flex items-center ml-2">
-              <div className="flex items-center gap-2 font-bold text-slate-700">
-                <div className="bg-[#3b82f6] w-10 h-10 rounded-lg flex items-center justify-center text-white">
-                  <Briefcase size={20} />
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-[16px] font-black tracking-tight animate-rgb-glow uppercase whitespace-nowrap">
-                    Jobs.talukdaracademy.com.bd
-                  </span>
-                  <div className="h-[2px] w-12 bg-blue-400/40 rounded-full mt-0.5" />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-6">
-              <InstallPWA />
-              <a 
-                href="https://www.talukdaracademy.com.bd/p/birth-date-calculate-your-age-year-here.html"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hidden sm:flex items-center gap-2 px-4 py-2 bg-[#3b82f6]/10 text-[#3b82f6] rounded-full text-xs font-bold hover:bg-[#3b82f6]/20 transition-all border border-[#3b82f6]/20"
+        {!selectedJob && (
+          <header className="h-[60px] md:h-[72px] bg-white border-b border-[#e2e8f0] flex items-center justify-between px-4 md:px-6 shrink-0 shadow-sm relative z-10">
+            <div className="flex items-center gap-2 md:gap-4">
+              <button 
+                onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                className="p-1.5 md:p-2 hover:bg-slate-100 rounded-lg text-slate-600 transition-colors"
               >
-                <Calculator size={14} />
-                Age Calculator
-              </a>
-          </div>
-        </header>
+                <div className="space-y-1 md:space-y-1.5 font-bold">
+                  <div className="w-5 md:w-6 h-0.5 bg-current"></div>
+                  <div className="w-5 md:w-6 h-0.5 bg-current"></div>
+                  <div className="w-5 md:w-6 h-0.5 bg-current"></div>
+                </div>
+              </button>
+              <div className="md:hidden flex items-center cursor-pointer" onClick={() => { setActivePage('home'); setSelectedJob(null); window.scrollTo({top: 0, behavior: 'smooth'}); }}>
+                <div className="flex items-center gap-1.5 font-bold text-slate-700">
+                  <div className="bg-[#3b82f6] w-7 h-7 rounded-lg flex items-center justify-center text-white">
+                    <Briefcase size={16} />
+                  </div>
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-[11px] font-black tracking-tighter animate-rgb-glow uppercase whitespace-nowrap">
+                      Jobs.talukdaracademy
+                    </span>
+                    <div className="h-[1px] w-6 bg-blue-400/40 rounded-full" />
+                  </div>
+                </div>
+              </div>
+              <div className="hidden md:flex items-center ml-2 cursor-pointer" onClick={() => { setActivePage('home'); setSelectedJob(null); window.scrollTo({top: 0, behavior: 'smooth'}); }}>
+                <div className="flex items-center gap-2 font-bold text-slate-700">
+                  <div className="bg-[#3b82f6] w-10 h-10 rounded-lg flex items-center justify-center text-white">
+                    <Briefcase size={20} />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-[16px] font-black tracking-tight animate-rgb-glow uppercase whitespace-nowrap">
+                      Jobs.talukdaracademy.com.bd
+                    </span>
+                    <div className="h-[2px] w-12 bg-blue-400/40 rounded-full mt-0.5" />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-6">
+                <InstallPWA />
+                <a 
+                  href="https://www.talukdaracademy.com.bd/p/birth-date-calculate-your-age-year-here.html"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hidden sm:flex items-center gap-2 px-4 py-2 bg-[#3b82f6]/10 text-[#3b82f6] rounded-full text-xs font-bold hover:bg-[#3b82f6]/20 transition-all border border-[#3b82f6]/20"
+                >
+                  <Calculator size={14} />
+                  Age Calculator
+                </a>
+            </div>
+          </header>
+        )}
 
         {/* Dashboard/Detail View Switch */}
         <div 
@@ -2061,7 +2075,7 @@ export default function App() {
             {/* Footer */}
             <footer className="mt-8 py-8 text-center text-slate-500 border-t border-slate-200">
               <div className="flex flex-col md:flex-row items-center justify-between gap-4 max-w-5xl mx-auto px-4">
-                <div className="text-sm font-medium">© {toBengaliNumber(new Date().getFullYear())} Jobs.talukdaracademy.com.bd. All rights reserved.</div>
+                <div className="text-sm font-medium">© {toBengaliNumber(new Date().getFullYear())} <span className="cursor-pointer hover:text-blue-600 transition-colors" onClick={() => { setActivePage('home'); setSelectedJob(null); window.scrollTo({top: 0, behavior: 'smooth'}); }}>Jobs.talukdaracademy.com.bd</span>. All rights reserved.</div>
                 <div className="flex flex-wrap items-center justify-center gap-4 text-sm font-medium">
                   <button onClick={() => { setActivePage('privacy'); setSelectedJob(null); }} className="hover:text-blue-600 transition-colors hover:underline">Privacy Policy</button>
                   <button onClick={() => { setActivePage('terms'); setSelectedJob(null); }} className="hover:text-blue-600 transition-colors hover:underline">Terms of Service</button>
@@ -2246,7 +2260,7 @@ export default function App() {
                           <div className="mb-6 md:mb-8 space-y-6 md:space-y-8">
                             {selectedJob.imageUrls.map((url, idx) => (
                               <React.Fragment key={idx}>
-                                <div className="rounded-xl overflow-hidden border border-slate-200 shadow-sm bg-white">
+                                <div className="rounded-xl overflow-hidden border border-slate-200 shadow-sm bg-white mb-6">
                                   <p className="px-3 md:px-4 py-2 md:py-3 bg-slate-50 text-[12px] sm:text-[14px] font-bold text-[#3b82f6] uppercase tracking-widest text-center border-b border-slate-100 flex items-center justify-center gap-2">
                                     <Globe size={14} /> নিয়োগ বিজ্ঞপ্তি / সার্কুলার ছবি {selectedJob.imageUrls && selectedJob.imageUrls.length > 1 ? `(${idx + 1}/${selectedJob.imageUrls.length})` : ''}
                                   </p>
