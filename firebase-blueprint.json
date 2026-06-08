@@ -1,0 +1,29 @@
+{
+  "entities": {
+    "Job": {
+      "title": "Job",
+      "description": "A job circular",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "slug": { "type": "string" },
+        "title": { "type": "string" },
+        "organization": { "type": "string" },
+        "publishedDate": { "type": "string" },
+        "deadline": { "type": "string" },
+        "deadlineISO": { "type": ["string", "null"] },
+        "source": { "type": "string" },
+        "link": { "type": "string" },
+        "location": { "type": "string" },
+        "content": { "type": "string" },
+        "imageUrls": { "type": "array" }
+      }
+    }
+  },
+  "firestore": {
+    "jobs/{jobId}": {
+      "schema": "Job",
+      "description": "Job circulars fetched and pushed by the server"
+    }
+  }
+}

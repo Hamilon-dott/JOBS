@@ -344,11 +344,11 @@ function FacebookComments({ url }: { url: string }) {
 
 const AdminPanel = ({ 
   onSync, 
-  isRefreshingCache,
+  isSyncingFirebase,
   syncMessage
 }: { 
   onSync: (forceFull: boolean) => Promise<void>, 
-  isRefreshingCache: boolean,
+  isSyncingFirebase: boolean,
   syncMessage: { text: string; type: 'success' | 'error' | 'idle' }
 }) => {
   const [password, setPassword] = useState('');
@@ -357,7 +357,19 @@ const AdminPanel = ({
   const [adminJobs, setAdminJobs] = useState<Job[]>([]);
   const [isLoadingJobs, setIsLoadingJobs] = useState(false);
 
-  const fetchAdminJobs = async () => {};
+  const fetchAdminJobs = async () => {
+    setIsLoadingJobs(true);
+    try {
+      const resp = await axios.get(`/api/jobs?full=true&admin=true&t=${Date.now()}`);
+      if (Array.isArray(resp.data)) {
+        setAdminJobs(resp.data);
+      }
+    } catch (e) {
+      console.error("Admin fetch jobs error:", e);
+    } finally {
+      setIsLoadingJobs(false);
+    }
+  };
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -426,7 +438,7 @@ const AdminPanel = ({
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
           <h2 className="text-lg font-semibold text-slate-700 mb-2">Manual Data Sync</h2>
           <p className="text-sm text-slate-500 mb-4 tracking-wide">
-            Fetch the latest circulars from the source and save them to Server RAM Cache. Automatically updates the lists.
+            Fetch the latest circulars from the source and save them to Firebase. Automatically updates the lists.
           </p>
           {syncMessage.text && (
             <div className={`p-3 mb-4 rounded text-sm font-medium flex items-start gap-2 ${syncMessage.type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
@@ -436,11 +448,11 @@ const AdminPanel = ({
           )}
           <button 
             onClick={handleSyncAndRefresh} 
-            disabled={isRefreshingCache}
+            disabled={isSyncingFirebase}
             className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg shadow-sm hover:bg-blue-700 disabled:opacity-75 disabled:cursor-not-allowed transition-all active:scale-[0.98]"
           >
-            {isRefreshingCache ? <Loader2 className="animate-spin w-4 h-4" /> : <RefreshCw className="w-4 h-4" />}
-            {isRefreshingCache ? 'Syncing...' : 'Fetch & Save to RAM Cache'}
+            {isSyncingFirebase ? <Loader2 className="animate-spin w-4 h-4" /> : <RefreshCw className="w-4 h-4" />}
+            {isSyncingFirebase ? 'Syncing...' : 'Fetch & Save to Firebase'}
           </button>
         </div>
 
@@ -489,7 +501,7 @@ const AdminPanel = ({
             <tbody>
               {isLoadingJobs ? (
                 <tr>
-                  <td colSpan={5} className="py-8 text-center text-slate-500">Loading jobs from server cache...</td>
+                  <td colSpan={5} className="py-8 text-center text-slate-500">Loading jobs from Firebase...</td>
                 </tr>
               ) : filteredJobs.length === 0 ? (
                 <tr>
@@ -532,175 +544,7 @@ const AdminPanel = ({
   );
 };
 
-
-function parseBengaliDate(dateStr: string): Date | null {
-  const bengaliToEnglish: { [key: string]: string } = {
-    '০': '0', '১': '1', '২': '2', '৩': '3', '৪': '4',
-    '৫': '5', '৬': '6', '৭': '7', '৮': '8', '৯': '9'
-  };
-  const bengaliMonthsMap: { [key: string]: string } = {
-    'জানুয়ারি': '01', 'ফেব্রুয়ারি': '02', 'মার্চ': '03', 'এপ্রিল': '04',
-    'মে': '05', 'জুন': '06', 'জুলাই': '07', 'আগস্ট': '08',
-    'সেপ্টেম্বর': '09', 'অক্টোবর': '10', 'নভেম্বর': '11', 'ডিসেম্বর': '12'
-  };
-  let engStr = dateStr;
-  for (const [bn, en] of Object.keys(bengaliToEnglish).map(k => [k, bengaliToEnglish[k]])) {
-      engStr = engStr.replace(new RegExp(bn, 'g'), en);
-  }
-  let monthMatched = false;
-  for (const [bnMonth, enMonth] of Object.keys(bengaliMonthsMap).map(k => [k, bengaliMonthsMap[k]])) {
-    if (engStr.includes(bnMonth)) {
-      engStr = engStr.replace(bnMonth, enMonth);
-      monthMatched = true;
-      break;
-    }
-  }
-  const dateMatch = engStr.match(/(\d{1,2})[-\s\/]+(\d{1,2})[-\s\/]+(\d{4})/);
-  if (dateMatch) {
-    return new Date(`${dateMatch[3]}-${dateMatch[2].padStart(2,'0')}-${dateMatch[1].padStart(2,'0')}T00:00:00.000Z`);
-  }
-  return null;
-}
-
-function processWpPostClient(post: any, thirtyDaysAgo: Date, today: Date) {
-  const title = post.title?.rendered || "Job Circular";
-  const titleText = title.replace(/&#8211;/g, '-').replace(/&#8217;/g, "'").replace(/<\/?[^>]+(>|$)/g, "").trim();
-
-  const rawContent = post.content?.rendered || "";
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(rawContent, 'text/html');
-
-  const extractFromTableOrText = (labels: string[]) => {
-    let result = null;
-    const rows = doc.querySelectorAll('tr');
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-      const rowText = row.textContent?.toLowerCase() || '';
-      if (labels.some(label => rowText.includes(label.toLowerCase()))) {
-        const tds = row.querySelectorAll('td');
-        if (tds.length > 0) {
-          const value = tds[tds.length - 1].textContent?.trim();
-          if (value && value.length > 2 && value.length < 150) {
-            result = value;
-            break;
-          }
-        }
-      }
-    }
-    if (result) return result;
-
-    for (const label of labels) {
-      const regex = new RegExp(`${label}\\s*[:\sম=]+(?:<[^>]+>)*\s*([^<>\n]+)`, 'i');
-      const match = rawContent.match(regex);
-      if (match && match[1]) {
-        const val = match[1].replace(/<\/?[^>]+(>|$)/g, "").trim();
-        if (val.length > 2 && val.length < 150) return val;
-      }
-    }
-    return null;
-  };
-
-  let deadlineDate = null;
-  const deadlineText = extractFromTableOrText(['আবেদনের শেষ তারিখ', 'আবেদনের শেষ সময়', 'আবেদন শেষ', 'Last Date', 'Deadline']) || "সার্কুলার দেখুন";
-  const pdMatch = parseBengaliDate(deadlineText);
-  if (pdMatch && !isNaN(pdMatch.getTime())) {
-      deadlineDate = pdMatch;
-  }
-
-  if (deadlineDate && deadlineDate < thirtyDaysAgo) {
-    return null;
-  }
-
-  const postPubDate = new Date(post.date_gmt && post.date_gmt !== '0001-11-30T00:00:00' ? `${post.date_gmt}Z` : post.date);
-  let pubDate = postPubDate;
-  
-  const ninetyDaysAgo = new Date();
-  ninetyDaysAgo.setDate(today.getDate() - 90);
-  if (pubDate < ninetyDaysAgo && (!deadlineDate || deadlineDate < today)) {
-     return null;
-  }
-
-  const imgMatches = rawContent.matchAll(/src=["']([^"'>]+\.(?:jpg|jpeg|png|webp|gif)[^"'>]*)["']/gi);
-  const imageUrls = Array.from(imgMatches, m => m[1]);
-
-  let categories: string[] = [];
-  const embeddedTerms = post._embedded?.['wp:term']?.flat() || [];
-  const termNames = embeddedTerms.map((t: any) => (t.name || '').toLowerCase());
-  const titleLower = titleText.toLowerCase();
-
-  const hasGovtTag = termNames.some((name: string) => name === 'সরকারি চাকরি' || name.includes('govt job') || name === 'government job');
-  const hasBankTag = termNames.some((name: string) => name === 'ব্যাংক চাকরির খবর' || name.includes('bank job') || name === 'bank');
-  const isGovtPhrase = titleLower.includes('সরকারি চাকরি') || titleLower.includes('govt job');
-  const isBankPhrase = titleLower.includes('ব্যাংক চাকরির খবর') || titleLower.includes('bank job');
-
-  if ((hasGovtTag || isGovtPhrase)) categories.push('Government');
-  if (hasBankTag || isBankPhrase) {
-    if (!categories.includes('Bank')) categories.push('Bank');
-    if (!categories.includes('Private')) categories.push('Private');
-  }
-  if (termNames.some((n: string) => n.includes('ngo') || n.includes('এনজিও')) || titleLower.includes('ngo') || titleLower.includes('এনজিও')) {
-    if (!categories.includes('NGO')) categories.push('NGO');
-  }
-  const isPrivate = termNames.some((n: string) => n.includes('বেসরকারি') || n.includes('private')) || 
-                    titleLower.includes('private') || 
-                    ['private', 'company', 'limited', 'group', 'pvt', 'financial', 'insurance', 'সীমিত', 'গ্রুপ', 'লিমিটেড', 'কোম্পানি', 'বীমা']
-                    .some(k => titleLower.includes(k) || termNames.some(t => t.includes(k)));
-  
-  if (isPrivate && !categories.includes('Private') && !categories.includes('Bank') && !categories.includes('Government') && !categories.includes('NGO')) {
-    categories.push('Private');
-  }
-  if (categories.length === 0) categories.push('General');
-
-  const cleanContent = rawContent.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
-    .replace(/<a\b[^>]*>(.*?)<\/a>/gi, '$1')
-    .replace(/Source:|Powered by/gi, '')
-    .trim();
-
-  let orgName = extractFromTableOrText(['প্রতিষ্ঠানের নাম', 'প্রতিষ্ঠান', 'Organisation', 'Organization', 'Company Name']);
-  if (!orgName) {
-    orgName = titleText.split(/Job|Circular|নিয়োগ|বিজ্ঞপ্তি/i)[0].trim();
-    if (!orgName || orgName.length < 3) orgName = "BD Govt Job";
-  }
-
-  let applyLink = "https://jobs.talukdaracademy.com.bd";
-  const commonDomains = ['teletalk.com.bd', 'apply', 'registration', 'form', 'jobs.'];
-  const links = doc.querySelectorAll('a');
-  for(let i=0; i<links.length; i++) {
-    const href = links[i].getAttribute('href') || '';
-    const text = links[i].textContent?.toLowerCase() || '';
-    if (commonDomains.some(d => href.includes(d)) || text.includes('apply online') || text.includes('আবেদন করুন')) {
-      applyLink = href;
-      break;
-    }
-  }
-
-  if (cleanContent.length > 50) {
-    return {
-      id: String(post.id),
-      slug: (titleText.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-' + post.id).replace(/^-+|-+$/g, ''),
-      title: titleText,
-      organization: orgName,
-      publishedDate: pubDate.toISOString(),
-      deadline: deadlineText,
-      deadlineISO: deadlineDate ? deadlineDate.toISOString() : null,
-      remainingDays: extractFromTableOrText(['কয়দিন বাকি', 'আবেদনের সময় বাকি', 'সময় বাকি', 'Time Remaining', 'Remaining Days', 'Days Remaining']),
-      startTime: extractFromTableOrText(['আবেদন শুরুর তারিখ', 'আবেদন শুরু তারিখ', 'আবেদন শুরু', 'শুরু', 'Start Date', 'StartTime']) || "চলমান",
-      applyMethod: extractFromTableOrText(['আবেদনের পদ্ধতি', 'আবেদন পদ্ধতি', 'পদ্ধতি', 'How to Apply', 'Apply Method']) || "অনলাইনে / ডাকযোগে",
-      noticeSource: extractFromTableOrText(['বিজ্ঞপ্তির সোর্স', 'সূত্র', 'সোর্স', 'Source']) || "অনলাইন / অফিসিয়াল ওয়েবসাইট",
-      applyLink: applyLink,
-      source: categories.join(','),
-      link: post.link,
-      location: 'Bangladesh',
-      content: cleanContent,
-      imageUrls: imageUrls
-    };
-  }
-  return null;
-}
-
 export default function App() {
-
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -718,7 +562,7 @@ export default function App() {
   const [jobSummaries, setJobSummaries] = useState<Record<string, { text: string; loading: boolean; error?: string }>>({});
   const [isFirstVisit, setIsFirstVisit] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'updated' | 'up-to-date'>('idle');
-  const [isRefreshingCache, setIsRefreshingCache] = useState(false);
+  const [isSyncingFirebase, setIsSyncingFirebase] = useState(false);
   const [syncMessage, setSyncMessage] = useState<{ text: string; type: 'success' | 'error' | 'idle' }>({ text: '', type: 'idle' });
   const [lastSyncTime, setLastSyncTime] = useState<number | null>(null);
 
@@ -1052,9 +896,10 @@ export default function App() {
           } else {
              // Not in current list, try fetching directly from API
              try {
-               // Find directly in jobs array
-const foundJob = jobs.find(j => String(j.id) === String(jobId));
-if (foundJob && activePage === 'home') { setSelectedJob(foundJob); }
+               const response = await axios.get(`/api/job/${jobId}`);
+               if (response.data && response.data.id && activePage === 'home') {
+                 setSelectedJob(response.data);
+               }
              } catch (e) {
                console.warn("Direct job fetch failed", e);
              }
@@ -1191,18 +1036,26 @@ if (foundJob && activePage === 'home') { setSelectedJob(foundJob); }
   }, []);
 
   const handleManualSync = async (forceFull: boolean = false) => {
-    if (isRefreshingCache) return;
-    setIsRefreshingCache(true);
+    if (isSyncingFirebase) return;
+    setIsSyncingFirebase(true);
     setSyncMessage({ text: '', type: 'idle' });
     try {
-      await fetchJobs(true);
-      setSyncMessage({ text: 'সফলভাবে নতুন বিজ্ঞপ্তি আপডেট হয়েছে!', type: 'success' });
+      const response = await axios.get(`/api/sync-firebase?quick=${forceFull ? 'false' : 'true'}&full=${forceFull ? 'true' : 'false'}`);
+      if (response.data && response.data.success) {
+        setSyncMessage({ text: 'সফলভাবে নতুন বিজ্ঞপ্তি আপডেট হয়েছে!', type: 'success' });
+        // Force-refetch jobs list from Firebase
+        await fetchJobs(true);
+      } else {
+        setSyncMessage({ text: `আপডেট ব্যর্থ হয়েছে: ${response.data.error || 'অজানা ত্রুটি'}`, type: 'error' });
+      }
     } catch (err: any) {
       console.error("Error executing manual sync:", err);
-      setSyncMessage({ text: 'আপডেট ব্যর্থ হয়েছে: ' + (err.message || 'অজানা ত্রুটি'), type: 'error' });
+      setSyncMessage({ text: 'সার্ভারের সাথে যোগাযোগ করা যাচ্ছে না।', type: 'error' });
     } finally {
-      setTimeout(() => setSyncMessage({ text: '', type: 'idle' }), 5000);
-      setIsRefreshingCache(false);
+      setIsSyncingFirebase(false);
+      setTimeout(() => {
+        setSyncMessage({ text: '', type: 'idle' });
+      }, 5000);
     }
   };
 
@@ -1311,7 +1164,7 @@ if (foundJob && activePage === 'home') { setSelectedJob(foundJob); }
       return;
     }
 
-    // Background Full Load from Server Cache/WP API because cache expired or forced
+    // Background Full Load from Firebase/Server API because cache expired or forced
     try {
       const timestamp = Date.now();
       const response = await axios.get(`/api/jobs?full=true&t=${timestamp}`);
@@ -1382,19 +1235,12 @@ if (foundJob && activePage === 'home') { setSelectedJob(foundJob); }
     }
   };
 
-  const searchResults = React.useMemo(() => {
-    if (!searchTerm.trim()) return jobs;
-    const term = searchTerm.toLowerCase().trim();
-    return jobs.filter(job => 
-      (job.title && job.title.toLowerCase().includes(term)) ||
-      (job.organization && job.organization.toLowerCase().includes(term)) ||
-      (job.source && job.source.toLowerCase().includes(term))
-    );
-  }, [searchTerm, jobs]);
-
-  const filteredJobs = searchResults.filter(job => {
+  const filteredJobs = jobs.filter(job => {
+    const matchesSearch = job.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                          job.organization.toLowerCase().includes(searchTerm.toLowerCase());
+    
     // Check if the source (comma separated) contains the active filter
-    const jobCategories = typeof job.source === 'string' ? job.source.split(',').map(s => s.trim()) : [];
+    const jobCategories = job.source.split(',').map(s => s.trim());
     
     let matchesFilter = activeFilter === 'All' || jobCategories.includes(activeFilter);
     
@@ -1460,7 +1306,7 @@ if (foundJob && activePage === 'home') { setSelectedJob(foundJob); }
       }
     }
     
-    return matchesFilter;
+    return matchesSearch && matchesFilter;
   });
 
   const paginatedJobs = filteredJobs;
@@ -1592,7 +1438,7 @@ if (foundJob && activePage === 'home') { setSelectedJob(foundJob); }
       {activePage === 'admin' ? (
         <AdminPanel 
           onSync={handleManualSync} 
-          isRefreshingCache={isRefreshingCache} 
+          isSyncingFirebase={isSyncingFirebase} 
           syncMessage={syncMessage} 
         />
       ) : (
@@ -2073,7 +1919,7 @@ if (foundJob && activePage === 'home') { setSelectedJob(foundJob); }
 
                         <div className="flex items-center justify-between md:justify-end gap-4 border-t md:border-none pt-2 md:pt-0">
                           <div className="flex flex-wrap gap-1.5 justify-end">
-                            {typeof job.source === 'string' && job.source.split(',').map((src) => (
+                            {job.source.split(',').map((src) => (
                               <span key={src} className={cn(
                                 "tag px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider",
                                 src === 'Government' 
@@ -2298,7 +2144,7 @@ if (foundJob && activePage === 'home') { setSelectedJob(foundJob); }
                       >
                         <div className="mb-6">
                           <div className="flex flex-wrap gap-2 mb-4">
-                            {typeof selectedJob.source === 'string' && selectedJob.source.split(',').map((src) => (
+                            {selectedJob.source.split(',').map((src) => (
                               <span key={src} className={cn(
                                 "tag px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider",
                                 src === 'Government' 
