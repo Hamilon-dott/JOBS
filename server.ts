@@ -5,6 +5,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import https from 'https';
 import fs from 'fs';
+import { GoogleGenAI } from '@google/genai';
 
 // Initialize Firebase
 import { initializeApp } from 'firebase/app';
@@ -206,6 +207,36 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
     } catch (error) {
       console.error('Error syncing:', error);
       res.status(500).json({ error: 'Failed to sync to Firebase' });
+    }
+  });
+
+  app.post('/api/generate-summary', express.json(), async (req, res) => {
+    try {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        // Just return a fallback summary if no API key
+        return res.json({ summary: "No API key configured." });
+      }
+
+      const ai = new GoogleGenAI({ apiKey });
+      const { title, organization, content } = req.body;
+      const prompt = `Please provide a 1-2 paragraph engaging summary in Bengali for the following job posting. 
+      Highlight the key benefits of this job and clearly explain who is eligible to apply in simple Bengali.
+      Be concise, professional, and encouraging. Do not use Markdown headings like # or ==, but bold texts are fine.
+      
+      Job Title: ${title}
+      Organization: ${organization}
+      Details: ${(content || '').substring(0, 4000)}`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash", // Use a stable and likely available model
+        contents: prompt,
+      });
+
+      return res.json({ summary: response.text || '' });
+    } catch (error: any) {
+      console.error("Failed to generate summary via backend", error);
+      return res.status(500).json({ error: 'Failed to generate summary' });
     }
   });
 
@@ -858,7 +889,7 @@ async function fetchJobsFromWP(isFull: boolean = false) {
       for (let page = 1; page <= maxSearchPages; page++) {
         if (jobs.length >= targetCount) break;
 
-        const response = await axios.get(`${source.baseUrl}&orderby=modified&per_page=100&page=${page}`, { 
+        const response = await axios.get(`${source.baseUrl}&per_page=100&page=${page}`, { 
           httpsAgent, 
           timeout: 40000,
           headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }

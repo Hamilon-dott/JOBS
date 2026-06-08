@@ -40,7 +40,6 @@ import {
   AlertCircle,
   Tag
 } from 'lucide-react';
-import { GoogleGenAI } from "@google/genai";
 import { clsx, type ClassValue } from 'clsx';
 import Markdown from 'react-markdown';
 import { twMerge } from 'tailwind-merge';
@@ -566,30 +565,7 @@ export default function App() {
   const [syncMessage, setSyncMessage] = useState<{ text: string; type: 'success' | 'error' | 'idle' }>({ text: '', type: 'idle' });
   const [lastSyncTime, setLastSyncTime] = useState<number | null>(null);
 
-  const aiRef = React.useRef<GoogleGenAI | null>(null);
   const scrollContainerRef = React.useRef<HTMLDivElement>(null);
-
-  const getAI = () => {
-    if (!aiRef.current) {
-      let apiKey = "";
-      try {
-        apiKey = (import.meta.env.VITE_GEMINI_API_KEY as string) || "";
-      } catch (e) {}
-
-      if (!apiKey) {
-        try {
-          if (typeof process !== 'undefined' && process.env) {
-            apiKey = process.env.GEMINI_API_KEY || "";
-          }
-        } catch (e) {}
-      }
-
-      if (apiKey) {
-        aiRef.current = new GoogleGenAI({ apiKey });
-      }
-    }
-    return aiRef.current;
-  };
   const selectedJobRef = React.useRef(selectedJob);
   const showExitConfirmRef = React.useRef(showExitConfirm);
   const activePageRef = React.useRef(activePage);
@@ -1002,29 +978,16 @@ export default function App() {
       console.warn("Failed to read summary cache", e);
     }
 
-    const ai = getAI();
-    if (!ai) {
-      setJobSummaries(prev => ({ ...prev, [job.id]: { text: '', loading: false, error: 'API key not configured. Please check your Vercel environment variables.' } }));
-      return;
-    }
-
     setJobSummaries(prev => ({ ...prev, [job.id]: { text: '', loading: true } }));
     
     try {
-      const prompt = `Please provide a 1-2 paragraph engaging summary in Bengali for the following job posting. 
-      Highlight the key benefits of this job and clearly explain who is eligible to apply in simple Bengali.
-      Be concise, professional, and encouraging. Do not use Markdown headings like # or ==, but bold texts are fine.
-      
-      Job Title: ${job.title}
-      Organization: ${job.organization}
-      Details: ${(job.content || '').substring(0, 4000)}`;
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
+      const response = await axios.post('/api/generate-summary', {
+        title: job.title,
+        organization: job.organization,
+        content: job.content
       });
 
-      const summaryText = response.text || '';
+      const summaryText = response.data.summary || '';
       setJobSummaries(prev => ({ ...prev, [job.id]: { text: summaryText, loading: false } }));
 
       // Save to cache
