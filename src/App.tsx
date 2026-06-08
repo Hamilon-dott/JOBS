@@ -256,16 +256,13 @@ const InFeedAdComponent = () => {
   }, []);
 
   return (
-    <div className="w-full flex justify-center my-4 overflow-hidden min-h-[100px] min-w-[250px] bg-slate-50/50 rounded-xl relative">
-      <div className="absolute top-2 left-2 text-[10px] text-slate-400 font-medium tracking-wider uppercase">Advertisement</div>
-      <ins ref={insRef}
-           className="adsbygoogle w-full inline-block"
-           style={{ display: "block", minWidth: "250px" }}
-           data-ad-format="fluid"
-           data-ad-layout-key="-fb+5w+4e-db+86"
-           data-ad-client="ca-pub-7608093638667157"
-           data-ad-slot="7997452271"></ins>
-    </div>
+    <ins ref={insRef}
+         className="adsbygoogle"
+         style={{ display: "block" }}
+         data-ad-client="ca-pub-7608093638667157"
+         data-ad-slot="8382578589"
+         data-ad-format="auto"
+         data-full-width-responsive="true"></ins>
   );
 };
 
@@ -301,16 +298,13 @@ const AdComponent = () => {
   }, []);
 
   return (
-    <div className="w-full flex justify-center my-4 overflow-hidden min-h-[100px] min-w-[250px] bg-slate-50/50 rounded-xl relative">
-      <div className="absolute top-2 left-2 text-[10px] text-slate-400 font-medium tracking-wider uppercase">Advertisement</div>
-      <ins ref={insRef}
-           className="adsbygoogle w-full inline-block"
-           style={{ display: "block", minWidth: "250px" }}
-           data-ad-client="ca-pub-7608093638667157"
-           data-ad-slot="8382578589"
-           data-ad-format="auto"
-           data-full-width-responsive="true"></ins>
-    </div>
+    <ins ref={insRef}
+         className="adsbygoogle"
+         style={{ display: "block" }}
+         data-ad-client="ca-pub-7608093638667157"
+         data-ad-slot="8382578589"
+         data-ad-format="auto"
+         data-full-width-responsive="true"></ins>
   );
 };
 
