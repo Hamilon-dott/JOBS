@@ -239,32 +239,51 @@ const BD_GOVT_LOGO = "/img.png";
 
 const InFeedAdComponent = () => {
   const adRef = useRef<HTMLDivElement>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [insKey] = useState(() => `ins-${Math.random().toString(36).substring(2, 9)}`);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      try {
-        if (typeof window !== "undefined" && adRef.current) {
-          const adsbygoogle = (window as any).adsbygoogle || [];
-          adsbygoogle.push({});
-        }
-      } catch (e: any) {
-        console.warn("Google AdSense in-feed error:", e.message || e);
-      }
-    }, 450);
-    return () => clearTimeout(timer);
-  }, []);
+    if (typeof window === "undefined") return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting && !loaded) {
+            setLoaded(true);
+            try {
+              const adsbygoogle = (window as any).adsbygoogle || [];
+              adsbygoogle.push({});
+            } catch (e: any) {
+              console.warn("Google AdSense in-feed error:", e.message || e);
+            }
+            observer.disconnect();
+          }
+        });
+      },
+      { rootMargin: "150px" }
+    );
+
+    if (adRef.current) {
+      observer.observe(adRef.current);
+    }
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [loaded]);
 
   return (
     <div 
       ref={adRef}
-      className="w-full bg-[#f8fafc] border border-dashed border-slate-200 rounded-xl p-3 my-4 relative flex flex-col items-center justify-center min-h-[145px] sm:min-h-[160px] overflow-hidden transition-all duration-200 hover:border-slate-300 shadow-sm"
+      className="bg-white border border-[#e2e8f0] rounded-lg p-3 my-4 relative flex flex-col items-center justify-center min-h-[145px] md:min-h-[110px] w-full overflow-hidden shadow-sm hover:border-[#3b82f6]/30 transition-all duration-200"
     >
-      <div className="absolute top-1.5 left-2.5 text-[9px] text-[#94a3b8] font-bold tracking-wider uppercase bg-white border border-slate-100 rounded px-2.5 py-0.5 z-10 shadow-sm select-none">
+      <div className="absolute top-1.5 left-2.5 text-[9px] text-[#94a3b8] font-bold tracking-wider uppercase bg-slate-50 border border-slate-100 rounded px-2 py-0.5 z-10 select-none shadow-sm">
         বিজ্ঞাপন (ADVERTISEMENT)
       </div>
-      <div className="w-full flex justify-center items-center py-2 min-h-[90px]" style={{ margin: "0 auto" }}>
+      <div className="w-full flex justify-center items-center py-2 h-full min-h-[90px]" style={{ margin: "0 auto" }}>
         <ins className="adsbygoogle"
-             style={{ display: "block", width: "100%", height: "100%", minWidth: "250px", minHeight: "90px" }}
+             key={insKey}
+             style={{ display: "block" }}
              data-ad-format="fluid"
              data-ad-layout-key="-fb+5w+4e-db+86"
              data-ad-client="ca-pub-7608093638667157"
@@ -276,20 +295,38 @@ const InFeedAdComponent = () => {
 
 const AdComponent = () => {
   const adRef = useRef<HTMLDivElement>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [insKey] = useState(() => `ins-${Math.random().toString(36).substring(2, 9)}`);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      try {
-        if (typeof window !== "undefined" && adRef.current) {
-          const adsbygoogle = (window as any).adsbygoogle || [];
-          adsbygoogle.push({});
-        }
-      } catch (e: any) {
-        console.warn("Google AdSense in-article error:", e.message || e);
-      }
-    }, 450);
-    return () => clearTimeout(timer);
-  }, []);
+    if (typeof window === "undefined") return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting && !loaded) {
+            setLoaded(true);
+            try {
+              const adsbygoogle = (window as any).adsbygoogle || [];
+              adsbygoogle.push({});
+            } catch (e: any) {
+              console.warn("Google AdSense in-article error:", e.message || e);
+            }
+            observer.disconnect();
+          }
+        });
+      },
+      { rootMargin: "180px" }
+    );
+
+    if (adRef.current) {
+      observer.observe(adRef.current);
+    }
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [loaded]);
 
   return (
     <div 
@@ -301,7 +338,8 @@ const AdComponent = () => {
       </div>
       <div className="w-full flex justify-center items-center py-2 min-h-[200px]" style={{ margin: "0 auto" }}>
         <ins className="adsbygoogle"
-             style={{ display: "block", width: "100%", height: "250px", minWidth: "250px", minHeight: "250px" }}
+             key={insKey}
+             style={{ display: "block" }}
              data-ad-client="ca-pub-7608093638667157"
              data-ad-slot="8382578589"
              data-ad-format="auto"
@@ -2217,7 +2255,7 @@ export default function App() {
                         {selectedJob.imageUrls && selectedJob.imageUrls.length > 0 && (
                           <div className="mb-6 md:mb-8 space-y-6 md:space-y-8">
                             {selectedJob.imageUrls.map((url, idx) => (
-                              <React.Fragment key={idx}>
+                              <React.Fragment key={`${selectedJob.id}-img-group-${idx}`}>
                                 <div className="rounded-xl overflow-hidden border border-slate-200 shadow-sm bg-white mb-6">
                                   <p className="px-3 md:px-4 py-2 md:py-3 bg-slate-50 text-[12px] sm:text-[14px] font-bold text-[#3b82f6] uppercase tracking-widest text-center border-b border-slate-100 flex items-center justify-center gap-2">
                                     <Globe size={14} /> নিয়োগ বিজ্ঞপ্তি / সার্কুলার ছবি {selectedJob.imageUrls && selectedJob.imageUrls.length > 1 ? `(${idx + 1}/${selectedJob.imageUrls.length})` : ''}
