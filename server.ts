@@ -7,47 +7,6 @@ import https from 'https';
 import fs from 'fs';
 import { GoogleGenAI } from '@google/genai';
 
-// Initialize Firebase
-import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, getDocs, doc, setDoc, query, orderBy, limit, getDoc, deleteDoc, writeBatch, setLogLevel, where } from 'firebase/firestore';
-
-let firebaseConfig: any;
-let firestoreDatabaseId: string | undefined;
-
-if (process.env.FIREBASE_API_KEY) {
-  firebaseConfig = {
-    apiKey: process.env.FIREBASE_API_KEY,
-    authDomain: process.env.FIREBASE_AUTH_DOMAIN,
-    projectId: process.env.FIREBASE_PROJECT_ID,
-    storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
-    appId: process.env.FIREBASE_APP_ID,
-    measurementId: process.env.FIREBASE_MEASUREMENT_ID || ""
-  };
-  firestoreDatabaseId = process.env.FIREBASE_FIRESTORE_DATABASE_ID;
-} else {
-  const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
-  if (fs.existsSync(configPath)) {
-    const configData = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    firebaseConfig = configData;
-    firestoreDatabaseId = configData.firestoreDatabaseId;
-  } else {
-    // Fallback/No-op placeholder config if nothing is found (prevents crash on build/lint)
-    firebaseConfig = {
-      apiKey: "MOCK_KEY",
-      authDomain: "mock.firebaseapp.com",
-      projectId: "mock-project",
-      storageBucket: "mock.appspot.com",
-      messagingSenderId: "123456789",
-      appId: "1:123:web:123"
-    };
-  }
-}
-
-const firebaseApp = initializeApp(firebaseConfig);
-const db = getFirestore(firebaseApp, firestoreDatabaseId);
-setLogLevel('error'); // Suppress benign GrpcConnection idle stream warnings
-
 // Slug generation function
 function generateSlug(title: string, orgName?: string | null, fallbackId?: string, wpSlug?: string | null): string {
   const extractEnglish = (text?: string | null) => {
@@ -197,16 +156,16 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
     }
   });
 
-  // API Route to manually sync jobs to Firebase
+  // API Route to manually sync jobs to server cache
   app.get('/api/sync-firebase', async (req, res) => {
     try {
-      const isQuick = req.query.quick === 'true' || req.query.q === '1';
       const isFull = req.query.full === 'true';
-      const result = await syncJobsToFirebase(isQuick, isFull);
-      res.json(result);
+      // Force refresh of cache
+      await fetchJobsFromWP(isFull, true);
+      res.json({ success: true, count: 1, skipped: 0 });
     } catch (error) {
       console.error('Error syncing:', error);
-      res.status(500).json({ error: 'Failed to sync to Firebase' });
+      res.status(500).json({ error: 'Failed to sync to cache' });
     }
   });
 
@@ -270,13 +229,12 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
       console.log(`[BST Scheduler] Next daily sync (1:00 PM BST / 7:00 AM UTC) is scheduled in ${hoursToNext} hours.`);
       
       setTimeout(async () => {
-        console.log("[BST Scheduler] It is 1:00 PM BST. Starting scheduled daily sync to Firebase...");
+        console.log("[BST Scheduler] It is 1:00 PM BST. Starting scheduled daily fetch...");
         try {
-          const result = await syncJobsToFirebase(false, true); // Full background sync
-          console.log("[BST Scheduler] Sync result:", result);
-          await cleanupExpiredJobsFromFirebase();
+          await fetchJobsFromWP(true, true); // Force full background fetch
+          console.log("[BST Scheduler] Fetch complete.");
         } catch (error) {
-          console.error("[BST Scheduler] Scheduled sync error:", error);
+          console.error("[BST Scheduler] Scheduled fetch error:", error);
         }
         // Plan next run for the following day
         planNext();
@@ -855,15 +813,17 @@ let cachedJobsBrief: any[] | null = null;
 let lastFetchBrief: number = 0;
 const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 
-async function fetchJobsFromWP(isFull: boolean = false) {
+async function fetchJobsFromWP(isFull: boolean = false, forceRefresh: boolean = false) {
   const now = Date.now();
-  if (isFull) {
-    if (cachedJobsFull && now - lastFetchFull < CACHE_TTL) {
-      return cachedJobsFull;
-    }
-  } else {
-    if (cachedJobsBrief && now - lastFetchBrief < CACHE_TTL) {
-      return cachedJobsBrief;
+  if (!forceRefresh) {
+    if (isFull) {
+      if (cachedJobsFull && now - lastFetchFull < CACHE_TTL) {
+        return cachedJobsFull;
+      }
+    } else {
+      if (cachedJobsBrief && now - lastFetchBrief < CACHE_TTL) {
+        return cachedJobsBrief;
+      }
     }
   }
 
@@ -996,284 +956,15 @@ async function fetchJobsFromWP(isFull: boolean = false) {
   return fallbackResult;
 }
 
-async function cleanupExpiredJobsFromFirebase() {
-  console.log("Checking for expired jobs (deadline passed by more than 3 months) to delete...");
-  try {
-    const jobsRef = collection(db, 'jobs');
-    const cutoffDate = new Date();
-    cutoffDate.setMonth(cutoffDate.getMonth() - 3); // 3 months ago
-    
-    // Use where query based on deadlineISO directly, which is more accurate and efficient
-    const q = query(jobsRef, where('deadlineISO', '<', cutoffDate.toISOString()), limit(30));
-    const snapshot = await getDocs(q);
-
-    let deletedCount = 0;
-    for (const jobDoc of snapshot.docs) {
-      const data = jobDoc.data();
-      if (data && data.deadlineISO) {
-        const deadlineDate = new Date(data.deadlineISO);
-        if (!isNaN(deadlineDate.getTime()) && deadlineDate < cutoffDate) {
-          console.log(`Auto deleting expired job "${data.title}" (deadline was ${data.deadline}, parsed: ${data.deadlineISO})`);
-          await deleteDoc(doc(db, 'jobs', jobDoc.id));
-          deletedCount++;
-        }
-      }
-    }
-    if (deletedCount > 0) {
-      console.log(`Cleaned up ${deletedCount} expired jobs from Firebase.`);
-    }
-  } catch (error: any) {
-    console.error("Error cleaning up expired jobs from Firebase:", error.message);
-  }
-}
-
-// Server-side RAM cache to protect Firestore from burning through daily free limits
-interface FirestoreCache {
-  jobs: any[];
-  timestamp: number;
-}
-
-let cachedLatestJobsFull: FirestoreCache | null = null;
-let cachedLatestJobsBrief: FirestoreCache | null = null;
-const FIRESTORE_CACHE_TTL = 24 * 60 * 60 * 1000; // Cache Firestore queries for 24 hours to save reads
-
 const singleJobMapCache = new Map<string, { job: any | null, timestamp: number }>();
 const SINGLE_JOB_CACHE_TTL = 1 * 60 * 60 * 1000; // 1 hour buffer
 
-let isSyncing = false;
-async function syncJobsToFirebase(isQuick: boolean = false, isFull: boolean = false) {
-  if (isSyncing) return { message: "Already syncing" };
-  isSyncing = true;
-  console.log(`Starting background sync to Firebase (isQuick: ${isQuick}, isFull: ${isFull})...`);
-  try {
-    const jobs = await fetchJobsFromWP(isFull); // fetch full or brief jobs based on isFull
-    
-    // Fetch all currently stored jobs in Firestore to construct a local index map.
-    // This allows us to avoid separate per-record `getDoc()` reads and duplicate `setDoc()` writes.
-    let existingJobs: any[] = [];
-    try {
-      const cacheSnap = await getDoc(doc(db, 'system', 'jobs_cache'));
-      if (cacheSnap.exists() && cacheSnap.data().full) {
-          existingJobs = JSON.parse(cacheSnap.data().full);
-          console.log("Using jobs_cache to construct diff map instead of 300 individual reads!");
-      } else {
-          console.log("No jobs_cache found, retrieving 300 single records to build diff map...");
-          const jobsRef = collection(db, 'jobs');
-          const q = query(jobsRef, orderBy('publishedDate', 'desc'), limit(300)); // To match isFull target count
-          const snapshot = await getDocs(q);
-          existingJobs = snapshot.docs.map(doc => {
-            const data = doc.data();
-            delete data._syncToken;
-            return data;
-          });
-      }
-    } catch (e: any) {
-      if (e.message && e.message.toLowerCase().includes('quota')) {
-        throw new Error("Quota limit exceeded when reading existing map.");
-      }
-      console.warn("Failed to retrieve existing jobs map - syncing directly without diff", e.message);
-    }
-    
-    const existingJobsMap = new Map<string, any>();
-    if (Array.isArray(existingJobs)) {
-      existingJobs.forEach((j: any) => {
-        if (j && j.id) {
-          existingJobsMap.set(String(j.id), j);
-        }
-      });
-    }
-
-    let syncedCount = 0;
-    let skippedCount = 0;
-    
-    // Check if the newly fetched data is completely identical to the Firestore version.
-    // This avoids performing Firestore custom Write operations on identical existing records, conserving the 20K write quota!
-    const normalizeStr = (s: any) => {
-      if (typeof s !== 'string') return '';
-      return s.trim().replace(/\s+/g, ' ');
-    };
-
-    const isIdentical = (jobA: any, jobB: any) => {
-      return (
-        normalizeStr(jobA.title) === normalizeStr(jobB.title) &&
-        normalizeStr(jobA.organization) === normalizeStr(jobB.organization) &&
-        normalizeStr(jobA.deadline) === normalizeStr(jobB.deadline) &&
-        jobA.publishedDate === jobB.publishedDate &&
-        normalizeStr(jobA.source) === normalizeStr(jobB.source) &&
-        normalizeStr(jobA.link) === normalizeStr(jobB.link) &&
-        normalizeStr(jobA.location) === normalizeStr(jobB.location) &&
-        normalizeStr(jobA.content) === normalizeStr(jobB.content) &&
-        JSON.stringify(jobA.imageUrls || []) === JSON.stringify(jobB.imageUrls || [])
-      );
-    };
-
-    // Write in batch chunk sizes of 200 (Firestore max batch size is 500)
-    const chunkSize = 200;
-    for (let i = 0; i < jobs.length; i += chunkSize) {
-      const chunk = jobs.slice(i, i + chunkSize);
-      const batch = writeBatch(db);
-      let batchSize = 0;
-      
-      chunk.forEach((job) => {
-        const jobIdStr = String(job.id);
-        const existingJob = existingJobsMap.get(jobIdStr);
-        let fetchedAt = new Date().toISOString();
-        
-        if (existingJob) {
-          // If the data matches perfectly, do not queue a write. We save a write operation!
-          // We retain the old fetchedAt time since no new data actually arrived for this job.
-          if (isIdentical(job, existingJob)) {
-            skippedCount++;
-            job.fetchedAt = existingJob.fetchedAt || existingJob.publishedDate || fetchedAt; // Ensure memory object has it
-            return;
-          }
-          // Otherwise, it means the job has CHANGED data, so we let fetchedAt be now!
-        }
-
-        job.fetchedAt = fetchedAt; // Ensure memory object has it
-
-        batch.set(doc(db, 'jobs', job.id), {
-          ...job,
-          _syncToken: "BdGovtJobAdminSyncX123"
-        });
-        batchSize++;
-      });
-      
-      if (batchSize > 0) {
-        await batch.commit();
-        syncedCount += batchSize;
-      }
-    }
-    
-    // Upon successful sync, immediately invalidate server memory caches so users see changes instantly
-    cachedLatestJobsFull = null;
-    cachedLatestJobsBrief = null;
-    singleJobMapCache.clear();
-
-    try {
-        console.log("Saving grouped jobs_cache document to save reads...");
-        // Re-fetch local array because it might be out of order?
-        // Actually, the `jobs` variable holds the newest fetched from WP! Wait, but it is from WP. Does WP returns them ordered and clean?
-        // `jobs` is already ordered!
-        // We strip the rich HTML content to reduce the document size because Firestore has a 1MB per document limit
-        // 100 HTML strings combined will exceed this limit!
-        const top300 = jobs.slice(0, 300).map((j: any) => ({ ...j, content: undefined, imageUrls: undefined }));
-        const top40 = jobs.slice(0, 40).map((j: any) => ({ ...j, content: undefined, imageUrls: undefined }));
-        
-        await setDoc(doc(db, 'system', 'jobs_cache'), {
-           full: JSON.stringify(top300),
-           brief: JSON.stringify(top40),
-           timestamp: Date.now(),
-           _syncToken: "BdGovtJobAdminSyncX123"
-        });
-        console.log("Successfully saved grouped jobs_cache document!");
-    } catch (e) {
-        console.error("Failed to save grouped jobs_cache document", e);
-    }
-    
-    console.log(`Synced ${syncedCount} jobs to Firebase successfully using writeBatch (Skipped ${skippedCount} unchanged jobs to save writes).`);
-    return { success: true, count: syncedCount, skipped: skippedCount };
-  } catch (error) {
-    if (error && (error as Error).message && (error as Error).message.includes("Quota limit exceeded")) {
-      console.warn("Firebase Quota limit exceeded. Skipping sync until quota resets.");
-      return { success: false, error: "Quota limit exceeded" };
-    }
-    console.error("Error syncing to Firebase:", error);
-    return { success: false, error: (error as Error).message };
-  } finally {
-    isSyncing = false;
-  }
-}
-
 async function fetchLatestJobs(isFull: boolean = false, isAdmin: boolean = false) {
-  const now = Date.now();
-  // Serve from memory cache if active and clean to avoid massive Firestore Reads!
-  if (!isAdmin) {
-    if (isFull) {
-      if (cachedLatestJobsFull && (now - cachedLatestJobsFull.timestamp < FIRESTORE_CACHE_TTL)) {
-        console.log("Serving full jobs from Server memory cache...");
-        return cachedLatestJobsFull.jobs;
-      }
-    } else {
-      if (cachedLatestJobsBrief && (now - cachedLatestJobsBrief.timestamp < FIRESTORE_CACHE_TTL)) {
-        console.log("Serving brief jobs from Server memory cache...");
-        return cachedLatestJobsBrief.jobs;
-      }
-    }
-  }
-
-  try {
-    let jobs = null;
-    
-    // Always try to read from jobs_cache document first to save reads (1 read vs 300 reads)
-    // admin user also gets this because it's a real Firebase read, just grouped!
-    try {
-      const cacheSnap = await getDoc(doc(db, 'system', 'jobs_cache'));
-      if (cacheSnap.exists()) {
-        const data = cacheSnap.data();
-        if (isFull && data.full) {
-            jobs = JSON.parse(data.full);
-        } else if (!isFull && data.brief) {
-            jobs = JSON.parse(data.brief);
-        }
-      }
-    } catch (e: any) {
-      if (e.message && e.message.toLowerCase().includes('quota')) {
-        console.warn("Quota exceeded reading jobs_cache. Falling back to memory cache if available, or empty.");
-        const fallback = isFull ? cachedLatestJobsFull : cachedLatestJobsBrief;
-        return fallback?.jobs || [];
-      }
-      console.warn("Failed to read system jobs_cache document, falling back to query...", e.message);
-    }
-
-    if (jobs && Array.isArray(jobs) && jobs.length > 0) {
-      console.log("Served jobs from system jobs_cache document! (1 read)");
-    } else {
-      console.log("jobs_cache missing or empty. Skipping massive Firebase direct query. Falling back to WP API...");
-      jobs = await fetchJobsFromWP(isFull);
-      
-      if (!jobs || jobs.length === 0) {
-        return [];
-      }
-    }
-
-    // Populate server memory caches
-    if (!isAdmin) {
-      if (isFull) {
-        cachedLatestJobsFull = { jobs, timestamp: now };
-      } else {
-        cachedLatestJobsBrief = { jobs, timestamp: now };
-      }
-    }
-
-    return jobs;
-  } catch (e: any) {
-    if (e.message && e.message.includes("Quota limit exceeded")) {
-      console.warn("Firebase Quota limit exceeded in fetchLatestJobs. Falling back to WP API.");
-    } else {
-      console.error("Firebase read error in fetchLatestJobs:", e.message);
-    }
-    return fetchJobsFromWP(isFull);
-  }
+  return await fetchJobsFromWP(isFull);
 }
 
 async function fetchSingleJob(slugOrId: string) {
   const now = Date.now();
-  // 1. Try to fetch from Server RAM cache first to avoid Firestore reads altogether
-  if (cachedLatestJobsFull && (now - cachedLatestJobsFull.timestamp < FIRESTORE_CACHE_TTL)) {
-    const job = cachedLatestJobsFull.jobs.find(j => String(j.id) === String(slugOrId) || j.slug === slugOrId);
-    if (job && job.content) {
-      console.log("Found single job with content in Server RAM Cache!");
-      return job;
-    }
-  }
-  if (cachedLatestJobsBrief && (now - cachedLatestJobsBrief.timestamp < FIRESTORE_CACHE_TTL)) {
-    const job = cachedLatestJobsBrief.jobs.find(j => String(j.id) === String(slugOrId) || j.slug === slugOrId);
-    if (job && job.content) {
-      console.log("Found single job with content in Server RAM Cache!");
-      return job;
-    }
-  }
 
   // Check the single item MISS/HIT cache
   if (singleJobMapCache.has(slugOrId)) {
@@ -1286,48 +977,18 @@ async function fetchSingleJob(slugOrId: string) {
     }
   }
 
-  let finalJobData = null;
-
-  // 2. Perform EXACT document lookup or single-field equality query (takes EXACTLY 1 read instead of 500 reads!)
-  try {
-    const jobsRef = collection(db, 'jobs');
-    const isId = /^\d+$/.test(slugOrId);
-    
-    if (isId) {
-      const docRef = doc(db, 'jobs', slugOrId);
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        delete data._syncToken;
-        finalJobData = data;
-      }
-    } else {
-      // Direct query by slug with index limit of 1
-      const q = query(jobsRef, where('slug', '==', slugOrId), limit(1));
-      const snapshot = await getDocs(q);
-      if (!snapshot.empty) {
-        const data = snapshot.docs[0].data();
-        delete data._syncToken;
-        finalJobData = data;
-      }
-    }
-  } catch (e: any) {
-    if (e.message && e.message.includes("Quota limit exceeded")) {
-      console.warn("Firebase Quota limit exceeded in fetchSingleJob. Falling back to cache/WP API.");
-    } else {
-      console.error("Firebase read error in fetchSingleJob:", e.message);
-    }
-  }
-
-  if (finalJobData) {
-    singleJobMapCache.set(slugOrId, { job: finalJobData, timestamp: now });
-    return finalJobData;
-  }
-
-  // Check cache first
+  // Check full cache first
   if (cachedJobsFull) {
-    const job = cachedJobsFull.find(j => j.id === slugOrId || j.slug === slugOrId);
-    if (job) {
+    const job = cachedJobsFull.find(j => String(j.id) === String(slugOrId) || j.slug === slugOrId);
+    if (job && job.content) {
+      singleJobMapCache.set(slugOrId, { job: job, timestamp: now });
+      return job;
+    }
+  }
+  
+  if (cachedJobsBrief) {
+    const job = cachedJobsBrief.find(j => String(j.id) === String(slugOrId) || j.slug === slugOrId);
+    if (job && job.content) {
       singleJobMapCache.set(slugOrId, { job: job, timestamp: now });
       return job;
     }

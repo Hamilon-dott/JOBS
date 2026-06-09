@@ -1,58 +1,11 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
-import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, getDocs, doc, query, orderBy, limit } from 'firebase/firestore';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import https from 'https';
-import fs from 'fs';
-import path from 'path';
 
 const httpsAgent = new https.Agent({  
   rejectUnauthorized: false
 });
-
-// Initialize Firebase from environment variables or local config
-let firebaseApp: any;
-let db: any;
-
-const initializeFirebaseInVercel = () => {
-  if (db) return db;
-  
-  let firebaseConfig: any;
-  let firestoreDatabaseId: string | undefined;
-
-  if (process.env.FIREBASE_API_KEY) {
-    firebaseConfig = {
-      apiKey: process.env.FIREBASE_API_KEY,
-      authDomain: process.env.FIREBASE_AUTH_DOMAIN,
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
-      messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
-      appId: process.env.FIREBASE_APP_ID,
-      measurementId: process.env.FIREBASE_MEASUREMENT_ID || ""
-    };
-    firestoreDatabaseId = process.env.FIREBASE_FIRESTORE_DATABASE_ID;
-  } else {
-    const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
-    if (fs.existsSync(configPath)) {
-      const configData = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-      firebaseConfig = configData;
-      firestoreDatabaseId = configData.firestoreDatabaseId;
-    } else {
-      console.warn("Firebase configuration not found. Will default to local parsing fallback.");
-      return null;
-    }
-  }
-
-  try {
-    firebaseApp = initializeApp(firebaseConfig);
-    db = getFirestore(firebaseApp, firestoreDatabaseId);
-    return db;
-  } catch (err) {
-    console.error("Firebase init error:", err);
-    return null;
-  }
-};
 
 // Slug generation function
 function generateSlug(title: string, orgName?: string | null, fallbackId?: string): string {
@@ -61,10 +14,10 @@ function generateSlug(title: string, orgName?: string | null, fallbackId?: strin
     return text
       .toLowerCase()
       .trim()
-      .replace(/[^a-z0-9\s-]/g, '') // Keep words in English language, numbers, spaces, hyphens
-      .replace(/\s+/g, '-') // Replace spaces with hyphens
-      .replace(/-+/g, '-') // Replace multiple hyphens with single
-      .replace(/^-+|-+$/g, ''); // Remove leading/trailing hyphens
+      .replace(/[^a-z0-9\s-]/g, '')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-+|-+$/g, '');
   };
 
   let slug = extractEnglish(title);
@@ -194,39 +147,25 @@ const parseBengaliDate = (dateStr: string): Date | null => {
   return null;
 };
 
-async function fetchLatestJobsFromFirestore(isFull: boolean = false) {
-  try {
-    const firestoreDb = initializeFirebaseInVercel();
-    if (!firestoreDb) return null;
-
-    const jobsRef = collection(firestoreDb, 'jobs');
-    const limitCount = isFull ? 500 : 40;
-    const q = query(jobsRef, orderBy('publishedDate', 'desc'), limit(limitCount));
-    const snapshot = await getDocs(q);
-    
-    if (snapshot.empty) {
-      return null;
-    }
-    
-    return snapshot.docs.map(doc => {
-      const data = doc.data();
-      delete data._syncToken;
-      return data;
-    });
-  } catch (err: any) {
-    console.error("Vercel Firestore read error in fetchLatestJobsFromFirestore:", err.message);
-    return null;
-  }
-}
+// Global memory cache for Vercel serverless function (will persist across warm invocations but empty on cold starts)
+let cachedJobsFull: any[] | null = null;
+let cachedJobsBrief: any[] | null = null;
+let lastFetchFull: number = 0;
+let lastFetchBrief: number = 0;
+const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 
 async function fetchLatestJobs(isFull: boolean = false) {
-  // Try Firestore first!
-  const firestoreData = await fetchLatestJobsFromFirestore(isFull);
-  if (firestoreData && firestoreData.length > 0) {
-    return firestoreData;
+  const now = Date.now();
+  if (isFull) {
+    if (cachedJobsFull && now - lastFetchFull < CACHE_TTL) {
+      return cachedJobsFull;
+    }
+  } else {
+    if (cachedJobsBrief && now - lastFetchBrief < CACHE_TTL) {
+      return cachedJobsBrief;
+    }
   }
 
-  // Backup fallback: Parse live WordPress API
   const jobs: any[] = [];
   const sources = [
     { name: 'BD Govt Job', baseUrl: 'https://bdgovtjob.net/wp-json/wp/v2/posts?_embed' }
@@ -242,7 +181,7 @@ async function fetchLatestJobs(isFull: boolean = false) {
 
   for (const source of sources) {
     try {
-      console.log(`Fallback fetching from: ${source.name} (Full: ${isFull})...`);
+      console.log(`Fetching from API: ${source.name} (Full: ${isFull})...`);
       
       for (let page = 1; page <= maxSearchPages; page++) {
         if (jobs.length >= targetCount) break;
@@ -344,7 +283,7 @@ async function fetchLatestJobs(isFull: boolean = false) {
               .replace(/Source:|Powered by|Originally published on|See original post/gi, '')
               .trim();
 
-            const remainingDays = extractFromTableOrText(['কয়দিন বাকি', 'আবেদনের সময় বাকি', 'সময় বাকি', 'Time Remaining', 'Remaining Days', 'Days Remaining']);
+            const remainingDays = extractFromTableOrText(['কয়দিন বাকি', 'আবেদনের সময় বাকি', 'সময় বাকি', 'Time Remaining', 'Remaining Days', 'Days Remaining']);
             const startTime = extractFromTableOrText(['আবেদন শুরুর তারিখ', 'আবেদন শুরু তারিখ', 'আবেদন শুরু', 'শুরু', 'Start Date', 'StartTime']) || "চলমান";
             const applyMethod = extractFromTableOrText(['আবেদনের পদ্ধতি', 'আবেদন পদ্ধতি', 'পদ্ধতি', 'How to Apply', 'Apply Method']) || "অনলাইনে / ডাকযোগে";
             const noticeSource = extractFromTableOrText(['বিজ্ঞপ্তির সোর্স', 'সূত্র', 'সোর্স', 'Source']) || "অনলাইন / অফিসিয়াল ওয়েবসাইট";
@@ -367,7 +306,6 @@ async function fetchLatestJobs(isFull: boolean = false) {
               }
             });
 
-            // Get exact published date
             const pubDateText = extractFromTableOrText(['বিজ্ঞপ্তি প্রকাশের তারিখ', 'প্রকাশের তারিখ', 'বিজ্ঞপ্তি প্রকাশ', 'Publish Date', 'Published Date']);
             let finalPubDate = pubDate;
             if (pubDateText) {
@@ -411,38 +349,17 @@ async function fetchLatestJobs(isFull: boolean = false) {
     }
   }
 
-  if (jobs.length > 0) {
-    return jobs.sort((a, b) => new Date(b.publishedDate).getTime() - new Date(a.publishedDate).getTime());
+  // NOTE: do not sort here, retain API natural fetch order
+  
+  if (isFull) {
+    cachedJobsFull = jobs;
+    lastFetchFull = now;
+  } else {
+    cachedJobsBrief = jobs;
+    lastFetchBrief = now;
   }
 
-  // Final fallback to RSS if all Direct APIs failed
-  try {
-    const rssUrl = 'https://bdgovtjob.net/feed/';
-    console.log("Attempting RSS fallback...");
-    const response = await axios.get(`https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(rssUrl)}`, { timeout: 10000 });
-    if (response.data?.status === 'ok' && Array.isArray(response.data.items)) {
-      response.data.items.forEach((item: any, i: number) => {
-        const rawContent = item.content || item.description || "";
-        const pubDate = new Date(item.pubDate);
-        jobs.push({
-          id: `rss-${i}`,
-          slug: generateSlug(item.title.replace(/&#8211;/g, '-').replace(/&#8217;/g, "'"), "Job Circular") + `-${i}`,
-          title: item.title.replace(/&#8211;/g, '-').replace(/&#8217;/g, "'"),
-          organization: "Job Circular",
-          publishedDate: pubDate.toISOString(),
-          deadline: "See Details",
-          source: item.title.toLowerCase().includes('govt') ? 'Government' : 'General',
-          link: item.link,
-          location: 'Bangladesh',
-          content: rawContent.replace(/<a\b[^>]*>(.*?)<\/a>/gi, '$1').trim(),
-          imageUrls: [item.thumbnail || item.enclosure?.link || null].filter(Boolean)
-        });
-      });
-      return jobs.sort((a, b) => new Date(b.publishedDate).getTime() - new Date(a.publishedDate).getTime());
-    }
-  } catch (e: any) {
-    console.error('RSS fallback failed:', e.message);
-  }
+  if (jobs.length > 0) return jobs;
 
   const todayDate = new Date().toISOString();
   return [
@@ -462,34 +379,18 @@ async function fetchLatestJobs(isFull: boolean = false) {
 }
 
 async function fetchSingleJob(slugOrId: string) {
-  // Try Firestore first!
-  try {
-    const firestoreDb = initializeFirebaseInVercel();
-    if (firestoreDb) {
-      const jobsRef = collection(firestoreDb, 'jobs');
-      const q1 = query(jobsRef, orderBy('publishedDate', 'desc'), limit(500));
-      const snapshot = await getDocs(q1);
-      
-      for (const docSnapshot of snapshot.docs) {
-        const data = docSnapshot.data();
-        if (data.id === slugOrId || data.slug === slugOrId) {
-          delete data._syncToken;
-          return data;
-        }
-      }
-    }
-  } catch (firebaseErr: any) {
-    console.error("Vercel Firestore read error in fetchSingleJob:", firebaseErr.message);
+  if (cachedJobsFull) {
+    const cached = cachedJobsFull.find(j => j.id === slugOrId || j.slug === slugOrId);
+    if (cached) return cached;
   }
 
-  // Backup fallback: Get single job directly from WP API
   try {
     const isId = /^\d+$/.test(slugOrId);
     const endpoint = isId
       ? `https://bdgovtjob.net/wp-json/wp/v2/posts/${slugOrId}?_embed`
       : `https://bdgovtjob.net/wp-json/wp/v2/posts?slug=${encodeURIComponent(slugOrId)}&_embed`;
 
-    console.log("Fallback fetching single job from API:", endpoint);
+    console.log("Fetching single job from API:", endpoint);
     const response = await axios.get(endpoint, { timeout: 15000 });
     const post = isId ? response.data : (Array.isArray(response.data) ? response.data[0] : null);
 
@@ -541,7 +442,7 @@ async function fetchSingleJob(slugOrId: string) {
       location: 'Bangladesh'
     };
   } catch (e) {
-    console.error(`Fallback fetch single job ${slugOrId} failed:`, e);
+    console.error(`Fetch single job ${slugOrId} failed:`, e);
     return null;
   }
 }

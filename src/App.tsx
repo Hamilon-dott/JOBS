@@ -238,91 +238,47 @@ const getDaysRemaining = (deadlineStr: string) => {
 const BD_GOVT_LOGO = "/img.png";
 
 const InFeedAdComponent = () => {
-  const isAdSet = React.useRef(false);
-  const insRef = React.useRef<HTMLModElement>(null);
-
   useEffect(() => {
-    let timeoutId: NodeJS.Timeout;
-    let attempts = 0;
-
-    const pushAd = () => {
-      if (isAdSet.current || attempts > 10) return;
-      
-      const el = insRef.current;
-      if (el && el.offsetWidth > 0) {
-        try {
-          isAdSet.current = true;
-          const adsbygoogle = (window as any).adsbygoogle || [];
-          adsbygoogle.push({});
-        } catch (e: any) {
-          // completely swallow adsense errors to avoid console noise
-        }
-      } else {
-        attempts++;
-        timeoutId = setTimeout(pushAd, 500);
-      }
-    };
-
-    timeoutId = setTimeout(pushAd, 200);
-
-    return () => clearTimeout(timeoutId);
+    try {
+      const adsbygoogle = (window as any).adsbygoogle || [];
+      adsbygoogle.push({});
+    } catch (e: any) {
+      // swallow errors
+    }
   }, []);
 
   return (
     <div className="w-full relative my-2 pt-4 pb-1">
-      <div className="absolute top-0 left-2 text-[10px] text-slate-400 font-medium tracking-wider uppercase">Advertisement</div>
-      <ins ref={insRef}
-           className="adsbygoogle"
+      <div className="absolute top-0 left-2 text-[10px] text-slate-400 font-medium tracking-wider uppercase z-10">Advertisement</div>
+      <ins className="adsbygoogle"
            style={{ display: "block" }}
            data-ad-format="fluid"
            data-ad-layout-key="-fb+5w+4e-db+86"
            data-ad-client="ca-pub-7608093638667157"
-           data-ad-slot="7997452271"></ins>
+           data-ad-slot="7997452271" />
     </div>
   );
 };
 
 const AdComponent = () => {
-  const isAdSet = React.useRef(false);
-  const insRef = React.useRef<HTMLModElement>(null);
-
   useEffect(() => {
-    let timeoutId: NodeJS.Timeout;
-    let attempts = 0;
-
-    const pushAd = () => {
-      if (isAdSet.current || attempts > 10) return;
-      
-      const el = insRef.current;
-      if (el && el.offsetWidth > 0) {
-        try {
-          isAdSet.current = true;
-          const adsbygoogle = (window as any).adsbygoogle || [];
-          adsbygoogle.push({});
-        } catch (e: any) {
-          // completely swallow adsense errors to avoid console noise
-        }
-      } else {
-        attempts++;
-        timeoutId = setTimeout(pushAd, 500);
-      }
-    };
-
-    timeoutId = setTimeout(pushAd, 200);
-
-    return () => clearTimeout(timeoutId);
+    try {
+      const adsbygoogle = (window as any).adsbygoogle || [];
+      adsbygoogle.push({});
+    } catch (e: any) {
+      // swallow errors
+    }
   }, []);
 
   return (
-    <div className="w-full relative my-4 pt-4 pb-1 flex justify-center">
-      <div className="absolute top-0 left-2 text-[10px] text-slate-400 font-medium tracking-wider uppercase">Advertisement</div>
-      <ins ref={insRef}
-           className="adsbygoogle"
-           style={{ display: "block" }}
+    <div className="w-full relative my-4 pt-4 pb-1 flex justify-center bg-slate-50 rounded min-h-[100px]">
+      <div className="absolute top-1 left-2 text-[10px] text-slate-400 font-medium tracking-wider uppercase z-10">Advertisement</div>
+      <ins className="adsbygoogle w-full"
+           style={{ display: "block", textAlign: "center" }}
            data-ad-client="ca-pub-7608093638667157"
            data-ad-slot="8382578589"
            data-ad-format="auto"
-           data-full-width-responsive="true"></ins>
+           data-full-width-responsive="true" />
     </div>
   );
 };
@@ -356,11 +312,11 @@ function FacebookComments({ url }: { url: string }) {
 
 const AdminPanel = ({ 
   onSync, 
-  isSyncingFirebase,
+  isSyncingCache,
   syncMessage
 }: { 
   onSync: (forceFull: boolean) => Promise<void>, 
-  isSyncingFirebase: boolean,
+  isSyncingCache: boolean,
   syncMessage: { text: string; type: 'success' | 'error' | 'idle' }
 }) => {
   const [password, setPassword] = useState('');
@@ -450,7 +406,7 @@ const AdminPanel = ({
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
           <h2 className="text-lg font-semibold text-slate-700 mb-2">Manual Data Sync</h2>
           <p className="text-sm text-slate-500 mb-4 tracking-wide">
-            Fetch the latest circulars from the source and save them to Firebase. Automatically updates the lists.
+            Fetch the latest circulars from the source and update server cache. Automatically updates the lists.
           </p>
           {syncMessage.text && (
             <div className={`p-3 mb-4 rounded text-sm font-medium flex items-start gap-2 ${syncMessage.type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
@@ -460,11 +416,11 @@ const AdminPanel = ({
           )}
           <button 
             onClick={handleSyncAndRefresh} 
-            disabled={isSyncingFirebase}
+            disabled={isSyncingCache}
             className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg shadow-sm hover:bg-blue-700 disabled:opacity-75 disabled:cursor-not-allowed transition-all active:scale-[0.98]"
           >
-            {isSyncingFirebase ? <Loader2 className="animate-spin w-4 h-4" /> : <RefreshCw className="w-4 h-4" />}
-            {isSyncingFirebase ? 'Syncing...' : 'Fetch & Save to Firebase'}
+            {isSyncingCache ? <Loader2 className="animate-spin w-4 h-4" /> : <RefreshCw className="w-4 h-4" />}
+            {isSyncingCache ? 'Syncing...' : 'Fetch & Update Cache'}
           </button>
         </div>
 
@@ -513,7 +469,7 @@ const AdminPanel = ({
             <tbody>
               {isLoadingJobs ? (
                 <tr>
-                  <td colSpan={5} className="py-8 text-center text-slate-500">Loading jobs from Firebase...</td>
+                  <td colSpan={5} className="py-8 text-center text-slate-500">Loading jobs from server...</td>
                 </tr>
               ) : filteredJobs.length === 0 ? (
                 <tr>
@@ -574,7 +530,7 @@ export default function App() {
   const [jobSummaries, setJobSummaries] = useState<Record<string, { text: string; loading: boolean; error?: string }>>({});
   const [isFirstVisit, setIsFirstVisit] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'updated' | 'up-to-date'>('idle');
-  const [isSyncingFirebase, setIsSyncingFirebase] = useState(false);
+  const [isSyncingCache, setIsSyncingCache] = useState(false);
   const [syncMessage, setSyncMessage] = useState<{ text: string; type: 'success' | 'error' | 'idle' }>({ text: '', type: 'idle' });
   const [lastSyncTime, setLastSyncTime] = useState<number | null>(null);
 
@@ -1030,14 +986,14 @@ export default function App() {
   }, []);
 
   const handleManualSync = async (forceFull: boolean = false) => {
-    if (isSyncingFirebase) return;
-    setIsSyncingFirebase(true);
+    if (isSyncingCache) return;
+    setIsSyncingCache(true);
     setSyncMessage({ text: '', type: 'idle' });
     try {
-      const response = await axios.get(`/api/sync-firebase?quick=${forceFull ? 'false' : 'true'}&full=${forceFull ? 'true' : 'false'}`);
+      const response = await axios.get(`/api/sync-firebase?full=${forceFull ? 'true' : 'false'}`);
       if (response.data && response.data.success) {
         setSyncMessage({ text: 'সফলভাবে নতুন বিজ্ঞপ্তি আপডেট হয়েছে!', type: 'success' });
-        // Force-refetch jobs list from Firebase
+        // Force-refetch jobs list from server
         await fetchJobs(true);
       } else {
         setSyncMessage({ text: `আপডেট ব্যর্থ হয়েছে: ${response.data.error || 'অজানা ত্রুটি'}`, type: 'error' });
@@ -1046,7 +1002,7 @@ export default function App() {
       console.error("Error executing manual sync:", err);
       setSyncMessage({ text: 'সার্ভারের সাথে যোগাযোগ করা যাচ্ছে না।', type: 'error' });
     } finally {
-      setIsSyncingFirebase(false);
+      setIsSyncingCache(false);
       setTimeout(() => {
         setSyncMessage({ text: '', type: 'idle' });
       }, 5000);
@@ -1158,7 +1114,7 @@ export default function App() {
       return;
     }
 
-    // Background Full Load from Firebase/Server API because cache expired or forced
+    // Background Full Load from Server API because cache expired or forced
     try {
       const timestamp = Date.now();
       const response = await axios.get(`/api/jobs?full=true&t=${timestamp}`);
@@ -1303,33 +1259,7 @@ export default function App() {
     return matchesSearch && matchesFilter;
   });
 
-  // Find the single most recent weekly job paper to pin at the top
-  const mostRecentWeeklyJobId = React.useMemo(() => {
-    const weeklyJobs = jobs.filter(j => isWeeklyJobPaper(j.title));
-    if (weeklyJobs.length === 0) return null;
-    return weeklyJobs.reduce((latest, current) => {
-      const latestDate = new Date(latest.publishedDate).getTime();
-      const currentDate = new Date(current.publishedDate).getTime();
-      return currentDate > latestDate ? current : latest;
-    }).id;
-  }, [jobs]);
-
-  const sortedFilteredJobs = [...filteredJobs].sort((a, b) => {
-    // 1. Weekly Job Papers (Only the most recent one is pinned)
-    const aIsMostRecentWeekly = a.id === mostRecentWeeklyJobId;
-    const bIsMostRecentWeekly = b.id === mostRecentWeeklyJobId;
-
-    if (aIsMostRecentWeekly && !bIsMostRecentWeekly) return -1;
-    if (!aIsMostRecentWeekly && bIsMostRecentWeekly) return 1;
-
-    // 2. New Tag (Newly published)
-    const aNew = isNewJob(a.publishedDate);
-    const bNew = isNewJob(b.publishedDate);
-    if (aNew && !bNew) return -1;
-    if (!aNew && bNew) return 1;
-
-    return 0; // Maintain existing order for others (which should be modified date from API)
-  });
+  const sortedFilteredJobs = filteredJobs;
 
   const totalPages = Math.ceil(sortedFilteredJobs.length / itemsPerPage);
   const paginatedJobs = sortedFilteredJobs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
@@ -1462,7 +1392,7 @@ export default function App() {
       {activePage === 'admin' ? (
         <AdminPanel 
           onSync={handleManualSync} 
-          isSyncingFirebase={isSyncingFirebase} 
+          isSyncingCache={isSyncingCache} 
           syncMessage={syncMessage} 
         />
       ) : (
