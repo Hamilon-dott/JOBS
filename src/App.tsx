@@ -600,6 +600,88 @@ export default function App() {
   const [syncMessage, setSyncMessage] = useState<{ text: string; type: 'success' | 'error' | 'idle' }>({ text: '', type: 'idle' });
   const [lastSyncTime, setLastSyncTime] = useState<number | null>(null);
 
+  const [adBlockDetected, setAdBlockDetected] = useState(false);
+  const [isCheckingAdBlock, setIsCheckingAdBlock] = useState(true);
+  const [adBlockShake, setAdBlockShake] = useState(false);
+  const [adBlockWarn, setAdBlockWarn] = useState('');
+
+  const checkAdBlock = async () => {
+    if (typeof window === "undefined") return false;
+    
+    // If user is offline, do not flag as adblocker to prevent false positives
+    if (navigator && !navigator.onLine) {
+      setAdBlockDetected(false);
+      setIsCheckingAdBlock(false);
+      return false;
+    }
+
+    setIsCheckingAdBlock(true);
+    let isBlocked = false;
+
+    // Check 1: Bait Element test (instant detection)
+    try {
+      const bait = document.createElement('div');
+      bait.innerHTML = '&nbsp;';
+      bait.className = 'adsbox ad-placement ad-placeholder adsbygoogle doubleclick-ad pub_300x250 text-ad text_ads';
+      bait.setAttribute('style', 'position: absolute; top: -9999px; left: -9999px; width: 1px; height: 1px; display: block !important;');
+      document.body.appendChild(bait);
+      
+      // small delay to let browser / adblock extension do cosmetic filtering
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      const computedStyle = window.getComputedStyle ? window.getComputedStyle(bait, null) : null;
+      if (
+        bait.offsetHeight === 0 || 
+        bait.offsetWidth === 0 || 
+        (computedStyle && (computedStyle.display === 'none' || computedStyle.visibility === 'hidden'))
+      ) {
+        isBlocked = true;
+      }
+      document.body.removeChild(bait);
+    } catch (e) {
+      console.warn("Bait ad block check failed:", e);
+    }
+
+    // Check 2: Try to fetch a standard ad-network URL (network block detection)
+    if (!isBlocked) {
+      try {
+        const adUrls = [
+          'https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js',
+          'https://googleads.g.doubleclick.net/pagead/ads'
+        ];
+        
+        const results = await Promise.all(
+          adUrls.map(url => 
+            fetch(url, { method: 'HEAD', mode: 'no-cors', cache: 'no-store' })
+              .then(() => false) // loaded successfully
+              .catch(() => true) // fetch failed (blocked!)
+          )
+        );
+        
+        if (results.some(r => r === true)) {
+          isBlocked = true;
+        }
+      } catch (e) {
+        isBlocked = true;
+      }
+    }
+
+    setAdBlockDetected(isBlocked);
+    setIsCheckingAdBlock(false);
+    return isBlocked;
+  };
+
+  useEffect(() => {
+    checkAdBlock();
+
+    // Check periodically to enforce it dynamically every 15 seconds
+    const interval = setInterval(() => {
+      checkAdBlock();
+    }, 15000);
+
+    return () => clearInterval(interval);
+  }, []);
+
   const scrollContainerRef = React.useRef<HTMLDivElement>(null);
   const selectedJobRef = React.useRef(selectedJob);
   const showExitConfirmRef = React.useRef(showExitConfirm);
@@ -1464,6 +1546,109 @@ export default function App() {
       ) : (
         <>
         <AnimatePresence>
+        {adBlockDetected && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[9999] bg-slate-900/98 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }}
+              animate={adBlockShake ? { scale: [1, 0.97, 1.03, 0.97, 1.03, 1], x: [0, -10, 10, -10, 10, 0] } : { scale: 1, y: 0 }}
+              transition={adBlockShake ? { duration: 0.4 } : { type: "spring", damping: 25, stiffness: 180 }}
+              className="bg-white rounded-2xl border border-red-100 max-w-lg w-full p-6 md:p-8 shadow-2xl relative overflow-hidden"
+            >
+              {/* Highlight bar */}
+              <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-red-500 via-rose-500 to-red-600" />
+              
+              <div className="flex flex-col items-center text-center space-y-4 md:space-y-6">
+                {/* Warning Shield pulse */}
+                <div className="w-16 h-16 md:w-20 md:h-20 rounded-full bg-red-50 flex items-center justify-center relative shadow-inner animate-[pulse_2s_infinite]">
+                  <AlertCircle size={36} className="text-red-500" />
+                  <span className="absolute inset-0 rounded-full border-4 border-red-200/40 animate-ping [animation-duration:1.5s]" />
+                </div>
+                
+                <div className="space-y-2">
+                  <h2 className="text-xl md:text-2xl font-black text-slate-800 tracking-tight leading-tight">
+                    বিজ্ঞাপন বা অ্যাড ব্লকার চালু রয়েছে!
+                  </h2>
+                  <h3 className="text-xs md:text-sm font-semibold text-red-500 uppercase tracking-widest font-mono">
+                    Ad Blocker Detected!
+                  </h3>
+                </div>
+                
+                {/* Divider */}
+                <div className="w-16 h-0.5 bg-slate-200 rounded-full" />
+                
+                {/* Descrption box */}
+                <div className="text-left bg-slate-50 border border-slate-100 rounded-xl p-4 md:p-5 space-y-3.5 text-xs md:text-sm text-slate-600 leading-relaxed md:leading-relaxed">
+                  <p className="font-medium text-slate-700">
+                    আমাদের এই প্রিয় ল্যান্ডিং ও চাকরির তথ্য কেন্দ্রটি সম্পূর্ণ ফ্রি। এই ফ্রি সাইটের সকল সার্ভার খরচ এবং আমাদের টিমকে সচল রাখতে একমাত্র বিজ্ঞাপনই সাহায্য করে।
+                  </p>
+                  
+                  <div className="space-y-2 border-t border-slate-200 pt-3.5">
+                    <p className="font-bold text-slate-800 flex items-center gap-1.5 font-sans">
+                      <span className="w-1.5 h-1.5 bg-red-500 rounded-full" /> সমাধান করবেন কীভাবে?
+                    </p>
+                    <ol className="list-decimal list-inside space-y-1.5 text-slate-500 pl-1">
+                      <li>আপনার ব্রাউজারের <span className="font-semibold text-slate-700">AdBlock / uBlock Origin</span> এক্সটেনশনে যান।</li>
+                      <li>অথবা আপনার <span className="font-semibold text-slate-700">Brave Browser / Opera</span> এর অ্যাড-শিল্ড বা অ্যাড-ব্লকার অফ করুন।</li>
+                      <li>whitelist করুন অথবা অ্যাড ব্লকারটি পজ/ডিস্যাবল করুন।</li>
+                      <li>এরপর নিচের <span className="font-semibold text-slate-700">রি-চেক</span> বাটনে ক্লিক করুন।</li>
+                    </ol>
+                  </div>
+                </div>
+
+                {adBlockWarn && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: -5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs font-bold text-red-600 flex items-center gap-2 text-left w-full"
+                  >
+                    <AlertCircle size={14} className="shrink-0" />
+                    <span>{adBlockWarn}</span>
+                  </motion.div>
+                )}
+
+                {/* Control Action Buttons */}
+                <div className="w-full flex flex-col gap-2.5">
+                  <button
+                    onClick={async () => {
+                      setAdBlockWarn('');
+                      const blocked = await checkAdBlock();
+                      if (blocked) {
+                        setAdBlockShake(true);
+                        setAdBlockWarn('আমরা দুঃখিত! আপনার ব্রাউজারে বিজ্ঞাপন ব্লকারটি এখনও সচল রয়েছে। অনুগ্রহ করে বিজ্ঞাপন ব্লকারটি অফ করে রি-চেক করুন।');
+                        setTimeout(() => setAdBlockShake(false), 500);
+                      } else {
+                        setAdBlockWarn('');
+                      }
+                    }}
+                    disabled={isCheckingAdBlock}
+                    className="w-full bg-gradient-to-r from-red-600 via-rose-600 to-red-600 hover:from-red-500 hover:to-rose-500 text-white font-bold py-3 md:py-3.5 px-4 rounded-xl shadow-lg shadow-red-600/20 active:scale-98 transition-all duration-200 text-sm md:text-base flex items-center justify-center gap-2 cursor-pointer disabled:opacity-80"
+                  >
+                    {isCheckingAdBlock ? (
+                      <>
+                        <Loader2 className="animate-spin" size={18} />
+                        <span>যাচাই করা হচ্ছে (Checking)...</span>
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw size={18} className="animate-spin" style={{ animationDuration: '4s' }} />
+                        <span>আমি অ্যাড ব্লকার বন্ধ করেছি (Retry Now)</span>
+                      </>
+                    )}
+                  </button>
+                  
+                  <p className="text-[11px] text-slate-400 font-medium">
+                    whitelist or disable adblocker for <span className="font-semibold text-slate-500 font-mono">jobs.talukdaracademy.com.bd</span>
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
         {isClosing && (
           <motion.div 
             initial={{ opacity: 0 }}
