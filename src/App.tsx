@@ -41,7 +41,6 @@ import {
   Tag
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
-import Markdown from 'react-markdown';
 import { twMerge } from 'tailwind-merge';
 import Zoom from 'react-medium-image-zoom';
 import 'react-medium-image-zoom/dist/styles.css';
@@ -238,32 +237,34 @@ const getDaysRemaining = (deadlineStr: string) => {
 const BD_GOVT_LOGO = "/img.png";
 
 const InFeedAdComponent = () => {
-  const adRef = useRef<HTMLDivElement>(null);
-  const [loaded, setLoaded] = useState(false);
+  const [insKey] = useState(() => `ins-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`);
 
   useEffect(() => {
-    if (typeof window === "undefined" || loaded) return;
-    
     try {
-      const adsbygoogle = (window as any).adsbygoogle || [];
-      adsbygoogle.push({});
-      setLoaded(true);
+      if (typeof window !== "undefined") {
+        const adsbygoogle = (window as any).adsbygoogle || [];
+        // Only push if there are unpopulated ins elements
+        const unpopulatedAds = document.querySelectorAll('ins.adsbygoogle:not([data-adsbygoogle-status="done"])');
+        if (unpopulatedAds.length > 0) {
+          adsbygoogle.push({});
+        }
+      }
     } catch (e: any) {
-      console.warn("Google AdSense in-feed error:", e.message || e);
+      console.error("Google AdSense in-feed error:", e.message || e);
     }
-  }, [loaded]);
+  }, [insKey]);
 
   return (
     <div 
-      ref={adRef}
-      className="bg-white border border-[#e2e8f0] rounded-lg p-3 my-4 relative flex flex-col items-center justify-center min-h-[145px] md:min-h-[110px] w-full overflow-hidden shadow-sm hover:border-[#3b82f6]/30 transition-all duration-200"
+      className="bg-white border border-[#e2e8f0] rounded-lg my-4 relative flex flex-col min-h-[120px] w-full overflow-hidden shadow-sm"
     >
-      <div className="absolute top-1.5 left-2.5 text-[9px] text-[#94a3b8] font-bold tracking-wider uppercase bg-slate-50 border border-slate-100 rounded px-2 py-0.5 z-10 select-none shadow-sm">
-        বিজ্ঞাপন (ADVERTISEMENT)
+      <div className="absolute top-0 right-0 text-[10px] text-[#94a3b8] font-bold tracking-wider uppercase bg-slate-50 border border-slate-100 rounded-bl px-2 py-0.5 z-10 select-none shadow-sm">
+        বিজ্ঞাপন
       </div>
-      <div className="w-full flex justify-center items-center py-2 h-full min-h-[90px]" style={{ margin: "0 auto" }}>
+      <div className="w-full flex justify-center items-center h-full min-h-[100px] mt-[18px] overflow-hidden">
         <ins className="adsbygoogle"
-             style={{ display: "block", width: '100%' }}
+             key={insKey}
+             style={{ display: "block", width: "100%" }}
              data-ad-format="fluid"
              data-ad-layout-key="-fb+5w+4e-db+86"
              data-ad-client="ca-pub-7608093638667157"
@@ -274,32 +275,33 @@ const InFeedAdComponent = () => {
 };
 
 const InArticleAdComponent = () => {
-  const adRef = useRef<HTMLDivElement>(null);
-  const [loaded, setLoaded] = useState(false);
+  const [insKey] = useState(() => `ins-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`);
 
   useEffect(() => {
-    if (typeof window === "undefined" || loaded) return;
-    
     try {
-      const adsbygoogle = (window as any).adsbygoogle || [];
-      adsbygoogle.push({});
-      setLoaded(true);
+      if (typeof window !== "undefined") {
+        const adsbygoogle = (window as any).adsbygoogle || [];
+        const unpopulatedAds = document.querySelectorAll('ins.adsbygoogle:not([data-adsbygoogle-status="done"])');
+        if (unpopulatedAds.length > 0) {
+          adsbygoogle.push({});
+        }
+      }
     } catch (e: any) {
-      console.warn("Google AdSense in-article error:", e.message || e);
+      console.error("Google AdSense in-article error:", e.message || e);
     }
-  }, [loaded]);
+  }, [insKey]);
 
   return (
     <div 
-      ref={adRef}
-      className="w-full bg-[#f8fafc] border border-dashed border-slate-200 rounded-xl p-4 my-6 relative flex flex-col items-center justify-center min-h-[250px] sm:min-h-[280px] overflow-hidden transition-all duration-200 hover:border-slate-300 shadow-sm"
+      className="w-full bg-[#f8fafc] border border-dashed border-slate-200 rounded-xl my-6 relative flex flex-col min-h-[250px] overflow-hidden"
     >
-      <div className="absolute top-1.5 left-2.5 text-[9px] text-[#94a3b8] font-bold tracking-wider uppercase bg-white border border-slate-100 rounded px-2.5 py-0.5 z-10 shadow-sm select-none">
-        বিজ্ঞাপন (ADVERTISEMENT)
+      <div className="absolute top-0 right-0 text-[10px] text-[#94a3b8] font-bold tracking-wider uppercase bg-white border-b border-l border-slate-100 rounded-bl px-2.5 py-0.5 z-10 shadow-sm select-none">
+        বিজ্ঞাপন
       </div>
-      <div className="w-full flex justify-center items-center py-2 min-h-[200px]" style={{ margin: "0 auto" }}>
+      <div className="w-full flex justify-center items-center h-full min-h-[250px] mt-[18px] overflow-hidden">
         <ins className="adsbygoogle"
-             style={{ display: "block" }}
+             key={insKey}
+             style={{ display: "block", width: "100%" }}
              data-ad-client="ca-pub-7608093638667157"
              data-ad-slot="8382578589"
              data-ad-format="auto"
@@ -308,33 +310,6 @@ const InArticleAdComponent = () => {
     </div>
   );
 };
-
-function FacebookComments({ url }: { url: string }) {
-  useEffect(() => {
-    let attempts = 0;
-    const interval = setInterval(() => {
-      if ((window as any).FB) {
-        (window as any).FB.XFBML.parse();
-        clearInterval(interval);
-      }
-      attempts++;
-      if (attempts > 10) clearInterval(interval); // give up after 5 seconds
-    }, 500);
-
-    return () => clearInterval(interval);
-  }, [url]);
-
-  return (
-    <div className="w-full overflow-hidden flex justify-center" key={url}>
-      <div 
-        className="fb-comments" 
-        data-href={url} 
-        data-width="100%" 
-        data-numposts="5"
-      ></div>
-    </div>
-  );
-}
 
 const AdminPanel = ({ 
   onSync, 
@@ -2477,45 +2452,6 @@ export default function App() {
                           </div>
                         )}
 
-                        {/* AI Summary Section */}
-                        {jobSummaries[selectedJob.id] && (
-                          <div className="mb-6 md:mb-8 bg-indigo-50/50 border border-indigo-100 rounded-xl p-5 md:p-6 shadow-sm relative overflow-hidden">
-                            <div className="absolute -top-10 -right-10 w-32 h-32 bg-indigo-100/50 rounded-full blur-2xl"></div>
-                            <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-blue-100/50 rounded-full blur-2xl"></div>
-                            
-                            <div className="flex items-center gap-2 mb-3 md:mb-4 relative z-10">
-                              <h3 className="font-bold text-indigo-900 border-b border-indigo-100/50 pb-1 w-full flex items-center justify-between">
-                                সারসংক্ষেপ
-                              </h3>
-                            </div>
-                            
-                            <div className="relative z-10 text-slate-700 text-[13px] md:text-sm leading-relaxed max-w-none">
-                              {jobSummaries[selectedJob.id].loading ? (
-                                <div className="flex flex-col gap-2">
-                                  <div className="flex items-center gap-2 text-indigo-500 font-medium pb-2">
-                                      <Loader2 size={16} className="animate-spin" />
-                                      <span>অপেক্ষা করুন, জেনারেট হচ্ছে...</span>
-                                  </div>
-                                  <div className="space-y-2 animate-pulse w-full">
-                                    <div className="h-2 bg-indigo-100 rounded w-full"></div>
-                                    <div className="h-2 bg-indigo-100 rounded w-[90%]"></div>
-                                    <div className="h-2 bg-indigo-100 rounded w-[95%]"></div>
-                                    <div className="h-2 bg-indigo-100 rounded w-[80%]"></div>
-                                  </div>
-                                </div>
-                              ) : jobSummaries[selectedJob.id].error ? (
-                                <p className="text-rose-500 bg-rose-50 p-3 rounded-lg border border-rose-100 flex items-center gap-2">
-                                  <span className="text-[16px]">⚠️</span> {jobSummaries[selectedJob.id].error}
-                                </p>
-                              ) : (
-                                <div className="prose prose-sm prose-indigo md:prose-base prose-p:my-2 prose-strong:text-indigo-900">
-                                  <Markdown>{jobSummaries[selectedJob.id].text}</Markdown>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8 bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
                           <div className="flex items-center gap-4">
                             <div className="bg-blue-50/80 p-3 rounded-xl w-14 h-14 flex items-center justify-center border border-blue-100">
@@ -2544,12 +2480,6 @@ export default function App() {
                             <span className="text-xl shrink-0">⚠️</span>
                             <span><strong>সতর্কতা:</strong> আমরা বিভিন্ন বিশ্বস্ত মাধ্যম থেকে তথ্য সংগ্রহ করে সহজভাবে উপস্থাপন করি, আবেদনের পূর্বে মূল বিজ্ঞপ্তি যাচাই করে নিন।</span>
                           </p>
-                        </div>
-                        
-                        {/* Facebook Comments */}
-                        <div className="mt-8 bg-white p-4 md:p-6 rounded-xl border border-slate-200 shadow-sm">
-                          <h3 className="text-lg font-bold text-slate-800 mb-4 border-b border-slate-100 pb-2">মতামত দিন</h3>
-                          <FacebookComments url={`${window.location.origin}/jobs/${selectedJob.slug || generateSlug(selectedJob.title, selectedJob.organization, selectedJob.id)}`} />
                         </div>
                       </motion.div>
                     )}
