@@ -238,6 +238,8 @@ const BD_GOVT_LOGO = "/img.png";
 
 const InFeedAdComponent = () => {
   const [insKey] = useState(() => `ins-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`);
+  const [adError, setAdError] = useState<string | null>(null);
+  const insRef = useRef<HTMLModElement>(null);
 
   useEffect(() => {
     try {
@@ -248,9 +250,30 @@ const InFeedAdComponent = () => {
         if (unpopulatedAds.length > 0) {
           adsbygoogle.push({});
         }
+
+        // Check for ad load status after a small delay
+        const timer = setTimeout(() => {
+          if (insRef.current) {
+            const status = insRef.current.getAttribute('data-ad-status');
+            const doneStatus = insRef.current.getAttribute('data-adsbygoogle-status');
+            
+            if (status === 'unfilled') {
+              setAdError("AdSense Request Successful: But no ad was returned (Domain might need approval in AdSense dashboard or no inventory).");
+            } else if (doneStatus !== 'done') {
+              setAdError("AdSense Script Blocked: Try disabling AdBlocker or check network restrictions.");
+            } else if (insRef.current.innerHTML.trim() === "") {
+              setAdError("Ad Box Empty: Domain must be approved in AdSense dashboard. Vercel/Temp domains are often blocked by AdSense.");
+            } else {
+              setAdError(null); // Loaded successfully
+            }
+          }
+        }, 3000);
+
+        return () => clearTimeout(timer);
       }
     } catch (e: any) {
       console.error("Google AdSense in-feed error:", e.message || e);
+      setAdError(`Error: ${e.message}`);
     }
   }, [insKey]);
 
@@ -261,8 +284,15 @@ const InFeedAdComponent = () => {
       <div className="absolute top-0 right-0 text-[10px] text-[#94a3b8] font-bold tracking-wider uppercase bg-slate-50 border border-slate-100 rounded-bl px-2 py-0.5 z-10 select-none shadow-sm">
         বিজ্ঞাপন
       </div>
-      <div className="w-full flex justify-center items-center h-full min-h-[100px] mt-[18px] overflow-hidden">
+      <div className="w-full flex justify-center items-center h-full min-h-[100px] mt-[18px] overflow-hidden relative">
+        {adError && (
+          <div className="absolute inset-x-2 top-2 bottom-2 flex flex-col items-center justify-center bg-slate-50/95 border border-red-100 rounded text-center p-3 z-10">
+            <span className="text-red-500 font-bold text-xs mb-1">Ad Issue Details:</span>
+            <span className="text-slate-500 text-[11px] leading-relaxed">{adError}</span>
+          </div>
+        )}
         <ins className="adsbygoogle"
+             ref={insRef}
              key={insKey}
              style={{ display: "block", width: "100%" }}
              data-ad-format="fluid"
@@ -276,6 +306,8 @@ const InFeedAdComponent = () => {
 
 const InArticleAdComponent = () => {
   const [insKey] = useState(() => `ins-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`);
+  const [adError, setAdError] = useState<string | null>(null);
+  const insRef = useRef<HTMLModElement>(null);
 
   useEffect(() => {
     try {
@@ -285,9 +317,30 @@ const InArticleAdComponent = () => {
         if (unpopulatedAds.length > 0) {
           adsbygoogle.push({});
         }
+
+        // Check for ad load status after a small delay
+        const timer = setTimeout(() => {
+          if (insRef.current) {
+            const status = insRef.current.getAttribute('data-ad-status');
+            const doneStatus = insRef.current.getAttribute('data-adsbygoogle-status');
+            
+            if (status === 'unfilled') {
+              setAdError("AdSense Request Successful: But no ad was returned (Domain might need approval in AdSense dashboard or no inventory).");
+            } else if (doneStatus !== 'done') {
+              setAdError("AdSense Script Blocked: Try disabling AdBlocker or check network restrictions.");
+            } else if (insRef.current.innerHTML.trim() === "") {
+              setAdError("Ad Box Empty: Domain must be approved in AdSense dashboard. Vercel/Temp domains are often blocked by AdSense.");
+            } else {
+              setAdError(null); // Loaded successfully
+            }
+          }
+        }, 3000);
+
+        return () => clearTimeout(timer);
       }
     } catch (e: any) {
       console.error("Google AdSense in-article error:", e.message || e);
+      setAdError(`Error: ${e.message}`);
     }
   }, [insKey]);
 
@@ -298,8 +351,15 @@ const InArticleAdComponent = () => {
       <div className="absolute top-0 right-0 text-[10px] text-[#94a3b8] font-bold tracking-wider uppercase bg-white border-b border-l border-slate-100 rounded-bl px-2.5 py-0.5 z-10 shadow-sm select-none">
         বিজ্ঞাপন
       </div>
-      <div className="w-full flex justify-center items-center h-full min-h-[250px] mt-[18px] overflow-hidden">
+      <div className="w-full flex justify-center items-center h-full min-h-[250px] mt-[18px] overflow-hidden relative">
+        {adError && (
+          <div className="absolute inset-x-2 top-2 bottom-2 flex flex-col items-center justify-center bg-slate-50/95 border border-red-100 rounded text-center p-3 z-10">
+            <span className="text-red-500 font-bold text-xs mb-1">Ad Issue Details:</span>
+            <span className="text-slate-500 text-[11px] leading-relaxed">{adError}</span>
+          </div>
+        )}
         <ins className="adsbygoogle"
+             ref={insRef}
              key={insKey}
              style={{ display: "block", width: "100%" }}
              data-ad-client="ca-pub-7608093638667157"
