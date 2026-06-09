@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
 import { get as idbGet, set as idbSet } from 'idb-keyval';
@@ -238,47 +238,75 @@ const getDaysRemaining = (deadlineStr: string) => {
 const BD_GOVT_LOGO = "/img.png";
 
 const InFeedAdComponent = () => {
+  const adRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
-    try {
-      const adsbygoogle = (window as any).adsbygoogle || [];
-      adsbygoogle.push({});
-    } catch (e: any) {
-      // swallow errors
-    }
+    const timer = setTimeout(() => {
+      try {
+        if (typeof window !== "undefined" && adRef.current) {
+          const adsbygoogle = (window as any).adsbygoogle || [];
+          adsbygoogle.push({});
+        }
+      } catch (e: any) {
+        console.warn("Google AdSense in-feed error:", e.message || e);
+      }
+    }, 450);
+    return () => clearTimeout(timer);
   }, []);
 
   return (
-    <div className="w-full relative my-2 pt-4 pb-1">
-      <div className="absolute top-0 left-2 text-[10px] text-slate-400 font-medium tracking-wider uppercase z-10">Advertisement</div>
-      <ins className="adsbygoogle"
-           style={{ display: "block" }}
-           data-ad-format="fluid"
-           data-ad-layout-key="-fb+5w+4e-db+86"
-           data-ad-client="ca-pub-7608093638667157"
-           data-ad-slot="7997452271" />
+    <div 
+      ref={adRef}
+      className="w-full bg-[#f8fafc] border border-dashed border-slate-200 rounded-xl p-3 my-4 relative flex flex-col items-center justify-center min-h-[145px] sm:min-h-[160px] overflow-hidden transition-all duration-200 hover:border-slate-300 shadow-sm"
+    >
+      <div className="absolute top-1.5 left-2.5 text-[9px] text-[#94a3b8] font-bold tracking-wider uppercase bg-white border border-slate-100 rounded px-2.5 py-0.5 z-10 shadow-sm select-none">
+        বিজ্ঞাপন (ADVERTISEMENT)
+      </div>
+      <div className="w-full flex justify-center items-center py-2 min-h-[90px]" style={{ margin: "0 auto" }}>
+        <ins className="adsbygoogle"
+             style={{ display: "block", width: "100%", height: "100%", minWidth: "250px", minHeight: "90px" }}
+             data-ad-format="fluid"
+             data-ad-layout-key="-fb+5w+4e-db+86"
+             data-ad-client="ca-pub-7608093638667157"
+             data-ad-slot="7997452271" />
+      </div>
     </div>
   );
 };
 
 const AdComponent = () => {
+  const adRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
-    try {
-      const adsbygoogle = (window as any).adsbygoogle || [];
-      adsbygoogle.push({});
-    } catch (e: any) {
-      // swallow errors
-    }
+    const timer = setTimeout(() => {
+      try {
+        if (typeof window !== "undefined" && adRef.current) {
+          const adsbygoogle = (window as any).adsbygoogle || [];
+          adsbygoogle.push({});
+        }
+      } catch (e: any) {
+        console.warn("Google AdSense in-article error:", e.message || e);
+      }
+    }, 450);
+    return () => clearTimeout(timer);
   }, []);
 
   return (
-    <div className="w-full relative my-4 pt-4 pb-1 flex justify-center bg-slate-50 rounded min-h-[100px]">
-      <div className="absolute top-1 left-2 text-[10px] text-slate-400 font-medium tracking-wider uppercase z-10">Advertisement</div>
-      <ins className="adsbygoogle w-full"
-           style={{ display: "block", textAlign: "center" }}
-           data-ad-client="ca-pub-7608093638667157"
-           data-ad-slot="8382578589"
-           data-ad-format="auto"
-           data-full-width-responsive="true" />
+    <div 
+      ref={adRef}
+      className="w-full bg-[#f8fafc] border border-dashed border-slate-200 rounded-xl p-4 my-6 relative flex flex-col items-center justify-center min-h-[250px] sm:min-h-[280px] overflow-hidden transition-all duration-200 hover:border-slate-300 shadow-sm"
+    >
+      <div className="absolute top-1.5 left-2.5 text-[9px] text-[#94a3b8] font-bold tracking-wider uppercase bg-white border border-slate-100 rounded px-2.5 py-0.5 z-10 shadow-sm select-none">
+        বিজ্ঞাপন (ADVERTISEMENT)
+      </div>
+      <div className="w-full flex justify-center items-center py-2 min-h-[200px]" style={{ margin: "0 auto" }}>
+        <ins className="adsbygoogle"
+             style={{ display: "block", width: "100%", height: "250px", minWidth: "250px", minHeight: "250px" }}
+             data-ad-client="ca-pub-7608093638667157"
+             data-ad-slot="8382578589"
+             data-ad-format="auto"
+             data-full-width-responsive="true" />
+      </div>
     </div>
   );
 };
@@ -1090,8 +1118,8 @@ export default function App() {
     }
 
     const now = Date.now();
-    // Check if the cache is still valid (less than 24 hours old) and not forced
-    const isCacheValid = cachedSyncTime && (now - cachedSyncTime) < 24 * 60 * 60 * 1000;
+    // Check if the cache is still valid (less than 5 minutes old) and not forced
+    const isCacheValid = cachedSyncTime && (now - cachedSyncTime) < 5 * 60 * 1000;
     
     let shouldCheckForUpdates = force;
 
@@ -1109,8 +1137,8 @@ export default function App() {
     }
     
     if (!shouldCheckForUpdates) {
-      // Skip background check if already updated in the last 24 hours
-      console.log("Skipping background check since local data was updated less than 24 hours ago.");
+      // Skip background check if already updated in the last 5 minutes
+      console.log("Skipping background check since local data was updated less than 5 minutes ago.");
       return;
     }
 
