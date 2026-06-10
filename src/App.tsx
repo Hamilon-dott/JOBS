@@ -237,26 +237,17 @@ const getDaysRemaining = (deadlineStr: string) => {
 const BD_GOVT_LOGO = "/img.png";
 
 const InFeedAdComponent = () => {
-  const adContainerRef = useRef<HTMLDivElement>(null);
+  const [mountKey] = useState(() => Math.random().toString(36).substring(7));
+  const adRef = useRef<HTMLModElement>(null);
 
   useEffect(() => {
     let isMounted = true;
-    if (adContainerRef.current) {
-      // Clear container and securely inject fresh ad element
-      adContainerRef.current.innerHTML = "";
-      
-      const ins = document.createElement("ins");
-      ins.className = "adsbygoogle";
-      ins.style.display = "block";
-      ins.setAttribute("data-ad-client", "ca-pub-7608093638667157");
-      ins.setAttribute("data-ad-slot", "8382578589"); // Using Display Ad slot here too
-      ins.setAttribute("data-ad-format", "auto");
-      ins.setAttribute("data-full-width-responsive", "true");
-      
-      adContainerRef.current.appendChild(ins);
+    let pushAttempt = 0;
+    let timer: any;
 
-      const timer = setTimeout(() => {
-        if (!isMounted) return;
+    const pushAd = () => {
+      if (!isMounted) return;
+      if (adRef.current && adRef.current.offsetWidth > 0) {
         try {
           if (typeof window !== "undefined") {
             const adsbygoogle = (window as any).adsbygoogle || [];
@@ -267,51 +258,51 @@ const InFeedAdComponent = () => {
             console.error("Google AdSense in-feed error:", e.message || e);
           }
         }
-      }, 150);
+      } else if (pushAttempt < 10) {
+        pushAttempt++;
+        timer = setTimeout(pushAd, 300);
+      }
+    };
 
-      return () => {
-        isMounted = false;
-        clearTimeout(timer);
-      };
-    }
-  }, []);
+    timer = setTimeout(pushAd, 300);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, [mountKey]);
 
   return (
-    <div 
-      className="bg-white border border-[#e2e8f0] rounded-lg my-4 relative flex flex-col min-h-[120px] w-full overflow-hidden shadow-sm"
-    >
+    <div className="bg-white border border-[#e2e8f0] rounded-lg my-4 relative flex flex-col min-h-[120px] w-full min-w-[250px] overflow-hidden shadow-sm">
       <div className="absolute top-0 right-0 text-[10px] text-[#94a3b8] font-bold tracking-wider uppercase bg-slate-50 border border-slate-100 rounded-bl px-2 py-0.5 z-10 select-none shadow-sm">
         বিজ্ঞাপন
       </div>
-      <div 
-        ref={adContainerRef}
-        className="w-full mt-[18px] min-h-[250px] overflow-hidden relative block"
-      />
+      <div key={mountKey} className="w-full min-w-[250px] mt-[18px] min-h-[100px] overflow-hidden relative block flex justify-center">
+        <ins className="adsbygoogle"
+             ref={adRef}
+             style={{ display: "block" }}
+             data-ad-client="ca-pub-7608093638667157"
+             data-ad-slot="7997452271"
+             data-ad-format="fluid"
+             data-ad-layout-key="-fb+5w+4e-db+86"
+             data-full-width-responsive="true" />
+      </div>
     </div>
   );
 };
 
 const InArticleAdComponent = () => {
-  const adContainerRef = useRef<HTMLDivElement>(null);
+  const [mountKey] = useState(() => Math.random().toString(36).substring(7));
+  const adRef = useRef<HTMLModElement>(null);
 
   useEffect(() => {
     let isMounted = true;
-    if (adContainerRef.current) {
-      // Clear container and securely inject fresh ad element
-      adContainerRef.current.innerHTML = "";
-      
-      const ins = document.createElement("ins");
-      ins.className = "adsbygoogle";
-      ins.style.display = "block";
-      ins.setAttribute("data-ad-client", "ca-pub-7608093638667157");
-      ins.setAttribute("data-ad-slot", "8382578589");
-      ins.setAttribute("data-ad-format", "auto");
-      ins.setAttribute("data-full-width-responsive", "true");
-      
-      adContainerRef.current.appendChild(ins);
+    let pushAttempt = 0;
+    let timer: any;
 
-      const timer = setTimeout(() => {
-        if (!isMounted) return;
+    const pushAd = () => {
+      if (!isMounted) return;
+      if (adRef.current && adRef.current.offsetWidth > 0) {
         try {
           if (typeof window !== "undefined") {
             const adsbygoogle = (window as any).adsbygoogle || [];
@@ -322,26 +313,34 @@ const InArticleAdComponent = () => {
             console.error("Google AdSense in-article error:", e.message || e);
           }
         }
-      }, 150);
+      } else if (pushAttempt < 10) {
+        pushAttempt++;
+        timer = setTimeout(pushAd, 300);
+      }
+    };
 
-      return () => {
-        isMounted = false;
-        clearTimeout(timer);
-      };
-    }
-  }, []);
+    timer = setTimeout(pushAd, 300);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, [mountKey]);
 
   return (
-    <div 
-      className="w-full bg-[#f8fafc] border border-dashed border-slate-200 rounded-xl my-6 relative flex flex-col min-h-[250px] overflow-hidden"
-    >
+    <div className="w-full bg-[#f8fafc] border border-dashed border-slate-200 rounded-xl my-6 relative flex flex-col min-h-[250px] min-w-[250px] overflow-hidden">
       <div className="absolute top-0 right-0 text-[10px] text-[#94a3b8] font-bold tracking-wider uppercase bg-white border-b border-l border-slate-100 rounded-bl px-2.5 py-0.5 z-10 shadow-sm select-none">
         বিজ্ঞাপন
       </div>
-      <div 
-        ref={adContainerRef}
-        className="w-full mt-[18px] min-h-[250px] overflow-hidden relative block"
-      />
+      <div key={mountKey} className="w-full min-w-[250px] mt-[18px] min-h-[250px] overflow-hidden relative block flex justify-center">
+        <ins className="adsbygoogle"
+             ref={adRef}
+             style={{ display: "block" }}
+             data-ad-client="ca-pub-7608093638667157"
+             data-ad-slot="8382578589"
+             data-ad-format="auto"
+             data-full-width-responsive="true" />
+      </div>
     </div>
   );
 };
