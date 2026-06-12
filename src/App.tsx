@@ -236,6 +236,37 @@ const getDaysRemaining = (deadlineStr: string) => {
 
 const BD_GOVT_LOGO = "/img.png";
 
+const DisplayAdComponent = React.memo(() => {
+  useEffect(() => {
+    try {
+      if (typeof window !== "undefined") {
+        const adsbygoogle = (window as any).adsbygoogle || [];
+        adsbygoogle.push({});
+      }
+    } catch (e: any) {
+      if (e.message && !e.message.includes('already have ads')) {
+        console.error("Google AdSense error:", e.message || e);
+      }
+    }
+  }, []);
+
+  return (
+    <div className="w-full bg-[#f8fafc] border border-dashed border-slate-200 rounded-xl my-6 relative flex flex-col min-h-[250px] min-w-[250px] overflow-hidden">
+      <div className="absolute top-0 right-0 text-[10px] text-[#94a3b8] font-bold tracking-wider uppercase bg-white border-b border-l border-slate-100 rounded-bl px-2.5 py-0.5 z-10 shadow-sm select-none">
+        বিজ্ঞাপন
+      </div>
+      <div className="w-full mt-[18px] min-h-[250px] overflow-hidden block">
+        <ins className="adsbygoogle"
+             style={{ display: "block" }}
+             data-ad-client="ca-pub-7608093638667157"
+             data-ad-slot="8382578589"
+             data-ad-format="auto"
+             data-full-width-responsive="true" />
+      </div>
+    </div>
+  );
+}, () => true);
+
 declare global {
   interface Window {
     _Hasync: any[];
@@ -1908,6 +1939,10 @@ export default function App() {
                       </motion.a>
                     ];
                     
+                    if ((idx + 1) % 5 === 0) {
+                      elements.push(<div key={`ad-${job.id}`}><DisplayAdComponent /></div>);
+                    }
+                    
                     return elements;
                   })
                 ) : (
@@ -2172,6 +2207,7 @@ export default function App() {
                                     </Zoom>
                                   </div>
                                 </div>
+                                <DisplayAdComponent />
                               </React.Fragment>
                             ))}
                             
