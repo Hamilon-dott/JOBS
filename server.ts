@@ -161,8 +161,16 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
     try {
       const isFull = req.query.full === 'true';
       // Force refresh of cache
-      await fetchJobsFromWP(isFull, true);
-      res.json({ success: true, count: 1, skipped: 0 });
+      const updatedJobs = await fetchJobsFromWP(isFull, true);
+      const jobsFilePath = path.join(process.cwd(), 'jobs.json');
+      await fs.promises.writeFile(jobsFilePath, JSON.stringify(updatedJobs, null, 2), 'utf8');
+      
+      // Clear memory caches so it reads fresh from file or WP next time
+      cachedJobsFull = null;
+      cachedJobsBrief = null;
+      singleJobMapCache.clear();
+
+      res.json({ success: true, count: updatedJobs.length, skipped: 0 });
     } catch (error) {
       console.error('Error syncing:', error);
       res.status(500).json({ error: 'Failed to sync to cache' });
@@ -231,8 +239,13 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
       setTimeout(async () => {
         console.log("[BST Scheduler] It is 1:00 PM BST. Starting scheduled daily fetch...");
         try {
-          await fetchJobsFromWP(true, true); // Force full background fetch
-          console.log("[BST Scheduler] Fetch complete.");
+          const updatedJobs = await fetchJobsFromWP(true, true); // Force full background fetch
+          const jobsFilePath = path.join(process.cwd(), 'jobs.json');
+          await fs.promises.writeFile(jobsFilePath, JSON.stringify(updatedJobs, null, 2), 'utf8');
+          cachedJobsFull = null;
+          cachedJobsBrief = null;
+          singleJobMapCache.clear();
+          console.log("[BST Scheduler] Fetch complete & jobs.json updated.");
         } catch (error) {
           console.error("[BST Scheduler] Scheduled fetch error:", error);
         }
@@ -960,6 +973,18 @@ const singleJobMapCache = new Map<string, { job: any | null, timestamp: number }
 const SINGLE_JOB_CACHE_TTL = 1 * 60 * 60 * 1000; // 1 hour buffer
 
 async function fetchLatestJobs(isFull: boolean = false, isAdmin: boolean = false) {
+  try {
+    const jobsFilePath = path.join(process.cwd(), 'jobs.json');
+    if (fs.existsSync(jobsFilePath)) {
+      const data = await fs.promises.readFile(jobsFilePath, 'utf8');
+      const jobs = JSON.parse(data);
+      if (Array.isArray(jobs) && jobs.length > 0) {
+        return jobs;
+      }
+    }
+  } catch (error) {
+    console.error("Failed to read static jobs.json:", error);
+  }
   return await fetchJobsFromWP(isFull);
 }
 
@@ -976,6 +1001,22 @@ async function fetchSingleJob(slugOrId: string) {
        singleJobMapCache.delete(slugOrId);
     }
   }
+
+  // Check jobs.json first
+  try {
+    const jobsFilePath = path.join(process.cwd(), 'jobs.json');
+    if (fs.existsSync(jobsFilePath)) {
+      const data = await fs.promises.readFile(jobsFilePath, 'utf8');
+      const jobs = JSON.parse(data);
+      if (Array.isArray(jobs)) {
+         const job = jobs.find(j => String(j.id) === String(slugOrId) || j.slug === slugOrId);
+         if (job && job.content) {
+            singleJobMapCache.set(slugOrId, { job: job, timestamp: now });
+            return job;
+         }
+      }
+    }
+  } catch (error) {}
 
   // Check full cache first
   if (cachedJobsFull) {
