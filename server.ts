@@ -5,6 +5,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import https from 'https';
 import fs from 'fs';
+import os from 'os';
 import { GoogleGenAI } from '@google/genai';
 
 // Slug generation function
@@ -162,7 +163,7 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
       const isFull = req.query.full === 'true';
       // Force refresh of cache
       const updatedJobs = await fetchJobsFromWP(isFull, true);
-      const jobsFilePath = path.join(process.cwd(), 'jobs.json');
+      const jobsFilePath = path.join(os.tmpdir(), 'jobs.json');
       await fs.promises.writeFile(jobsFilePath, JSON.stringify(updatedJobs, null, 2), 'utf8');
       
       // Clear memory caches so it reads fresh from file or WP next time
@@ -240,12 +241,12 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
         console.log("[BST Scheduler] It is 1:00 PM BST. Starting scheduled daily fetch...");
         try {
           const updatedJobs = await fetchJobsFromWP(true, true); // Force full background fetch
-          const jobsFilePath = path.join(process.cwd(), 'jobs.json');
+          const jobsFilePath = path.join(os.tmpdir(), 'jobs.json');
           await fs.promises.writeFile(jobsFilePath, JSON.stringify(updatedJobs, null, 2), 'utf8');
           cachedJobsFull = null;
           cachedJobsBrief = null;
           singleJobMapCache.clear();
-          console.log("[BST Scheduler] Fetch complete & jobs.json updated.");
+          console.log("[BST Scheduler] Fetch complete & jobs cache updated in /tmp");
         } catch (error) {
           console.error("[BST Scheduler] Scheduled fetch error:", error);
         }
@@ -974,7 +975,7 @@ const SINGLE_JOB_CACHE_TTL = 1 * 60 * 60 * 1000; // 1 hour buffer
 
 async function fetchLatestJobs(isFull: boolean = false, isAdmin: boolean = false) {
   try {
-    const jobsFilePath = path.join(process.cwd(), 'jobs.json');
+    const jobsFilePath = path.join(os.tmpdir(), 'jobs.json');
     if (fs.existsSync(jobsFilePath)) {
       const data = await fs.promises.readFile(jobsFilePath, 'utf8');
       const jobs = JSON.parse(data);
@@ -1002,9 +1003,9 @@ async function fetchSingleJob(slugOrId: string) {
     }
   }
 
-  // Check jobs.json first
+  // Check cached jobs file first
   try {
-    const jobsFilePath = path.join(process.cwd(), 'jobs.json');
+    const jobsFilePath = path.join(os.tmpdir(), 'jobs.json');
     if (fs.existsSync(jobsFilePath)) {
       const data = await fs.promises.readFile(jobsFilePath, 'utf8');
       const jobs = JSON.parse(data);
