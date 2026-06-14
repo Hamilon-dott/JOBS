@@ -237,17 +237,38 @@ const getDaysRemaining = (deadlineStr: string) => {
 const BD_GOVT_LOGO = "/img.png";
 
 const DisplayAdComponent = React.memo(() => {
+  const adRef = useRef<HTMLModElement>(null);
+
   useEffect(() => {
-    try {
-      if (typeof window !== "undefined") {
-        const adsbygoogle = (window as any).adsbygoogle || [];
-        adsbygoogle.push({});
+    let isMounted = true;
+    let pushAttempt = 0;
+    let timer: any;
+
+    const pushAd = () => {
+      if (!isMounted) return;
+      if (adRef.current && adRef.current.offsetWidth > 0) {
+        try {
+          if (typeof window !== "undefined") {
+            const adsbygoogle = (window as any).adsbygoogle || [];
+            adsbygoogle.push({});
+          }
+        } catch (e: any) {
+          if (e.message && !e.message.includes('already have ads')) {
+            console.error("Google AdSense error:", e.message || e);
+          }
+        }
+      } else if (pushAttempt < 10) {
+        pushAttempt++;
+        timer = setTimeout(pushAd, 300);
       }
-    } catch (e: any) {
-      if (e.message && !e.message.includes('already have ads')) {
-        console.error("Google AdSense error:", e.message || e);
-      }
-    }
+    };
+
+    timer = setTimeout(pushAd, 300);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
   }, []);
 
   return (
@@ -255,8 +276,9 @@ const DisplayAdComponent = React.memo(() => {
       <div className="absolute top-0 right-0 text-[10px] text-[#94a3b8] font-bold tracking-wider uppercase bg-white border-b border-l border-slate-100 rounded-bl px-2.5 py-0.5 z-10 shadow-sm select-none">
         বিজ্ঞাপন
       </div>
-      <div className="w-full mt-[18px] min-h-[250px] overflow-hidden block">
+      <div className="w-full mt-[18px] min-h-[250px] overflow-hidden block relative flex justify-center">
         <ins className="adsbygoogle"
+             ref={adRef}
              style={{ display: "block" }}
              data-ad-client="ca-pub-7608093638667157"
              data-ad-slot="8382578589"
