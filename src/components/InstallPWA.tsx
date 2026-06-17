@@ -59,12 +59,11 @@ export default function InstallPWA() {
   return (
     <button
       onClick={handleInstallClick}
-      className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 rounded-full text-white text-xs font-bold transition-all transform hover:scale-105 active:scale-95 z-50 shadow-md"
+      className="flex items-center justify-center w-8 h-8 md:w-9 md:h-9 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 rounded-full text-white transition-all transform hover:scale-105 active:scale-95 shadow-md flex-shrink-0"
       aria-label="Install App"
+      title="Install App"
     >
-      <Download size={14} />
-      <span className="hidden sm:inline">Install App</span>
-      <span className="sm:hidden">Install</span>
+      <Download size={16} />
     </button>
   );
 }
