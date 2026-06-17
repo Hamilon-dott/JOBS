@@ -236,6 +236,113 @@ const getDaysRemaining = (deadlineStr: string) => {
 
 const BD_GOVT_LOGO = "/img.png";
 
+const useAdBlockDetector = () => {
+  const [isAdBlockEnabled, setIsAdBlockEnabled] = useState(false);
+
+  useEffect(() => {
+    let detectorTimer: any;
+    
+    const detectAdBlocker = async () => {
+      let isBlocked = false;
+
+      // Method 1: Check with a bait element that adblockers usually hide
+      const bait = document.createElement('div');
+      bait.className = 'adsbox pub_300x250 pub_300x250m pub_728x90 text-ad textAd text_ad text_ads text-ads text-ad-links flex';
+      bait.innerHTML = '&nbsp;';
+      bait.style.position = 'absolute';
+      bait.style.top = '-1000px';
+      bait.style.left = '-1000px';
+      
+      document.body.appendChild(bait);
+
+      // Wait a tiny bit for extensions to apply rules
+      await new Promise(res => setTimeout(res, 100));
+
+      const baitStyle = window.getComputedStyle(bait);
+      if (bait.offsetHeight === 0 || baitStyle.display === 'none') {
+        isBlocked = true;
+      }
+
+      document.body.removeChild(bait);
+
+      // Method 2: Check standard network request blocking (specifically for Brave shields)
+      if (!isBlocked) {
+        try {
+          await fetch('https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js', { 
+             method: 'HEAD',
+             mode: 'no-cors'
+          });
+        } catch (e) {
+          isBlocked = true;
+        }
+      }
+
+      setIsAdBlockEnabled(isBlocked);
+    };
+
+    // Run check initially
+    detectAdBlocker();
+    
+    // Also periodically re-check in case they enable it after loading
+    detectorTimer = setInterval(detectAdBlocker, 5000);
+
+    return () => {
+      clearInterval(detectorTimer);
+    };
+  }, []);
+
+  return isAdBlockEnabled;
+};
+
+const AdBlockModal = () => {
+  return (
+    <div className="fixed inset-0 z-[999999] flex items-center justify-center p-4 bg-slate-900/95 backdrop-blur-xl min-h-screen relative overflow-hidden">
+      {/* Background patterned texture */}
+      <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: "url('data:image/svg+xml,%3Csvg width=\\'60\\' height=\\'60\\' viewBox=\\'0 0 60 60\\' xmlns=\\'http://www.w3.org/2000/svg\\'%3E%3Cg fill=\\'none\\' fill-rule=\\'evenodd\\'%3E%3Cg fill=\\'%23ffffff\\' fill-opacity=\\'1\\'%3E%3Cpath d=\\'M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z\\'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E')" }}></div>
+      
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        className="w-full max-w-md bg-white rounded-3xl overflow-hidden shadow-2xl relative block border border-red-100"
+      >
+        <div className="flex flex-col items-center justify-center pt-8 pb-4">
+           <div className="bg-red-50 w-20 h-20 rounded-full flex items-center justify-center mb-4 ring-8 ring-red-50/50">
+             <ShieldOff size={36} className="text-red-500" strokeWidth={1.5} />
+           </div>
+           
+           <h2 className="text-2xl font-black text-slate-800 tracking-tight text-center px-6">
+             Ads Blocker Detected!
+           </h2>
+        </div>
+
+        <div className="px-8 pb-8 flex flex-col items-center">
+          <p className="text-center text-slate-600 font-medium leading-relaxed mb-6">
+            We noticed you are using an <strong className="text-red-500 font-bold uppercase tracking-wide">Ad Blocker</strong> or <strong className="text-orange-500 font-bold">Brave Shields</strong>. Our website relies on ads to keep the content free for everyone.
+          </p>
+
+          <div className="bg-slate-50 border border-slate-100 rounded-2xl w-full p-5 mb-8">
+             <div className="flex items-start gap-3">
+               <AlertCircle size={20} className="text-blue-500 mt-0.5 shrink-0" />
+               <div className="text-sm text-slate-600 text-left">
+                 <strong className="block text-slate-800 mb-1">How to access?</strong>
+                 Please disable your ad blocker or turn off Brave Shields for this site, then refresh the page to continue.
+               </div>
+             </div>
+          </div>
+
+          <button 
+            onClick={() => window.location.reload()}
+            className="w-full py-4 bg-gradient-to-r from-red-500 to-rose-500 hover:from-red-600 hover:to-rose-600 rounded-xl text-white font-bold text-lg shadow-lg shadow-red-200 transition-all transform hover:scale-[1.02] active:scale-[0.98]"
+          >
+            I have disabled it. Refresh
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
+
 const DisplayAdComponent = React.memo(() => {
   const adRef = useRef<HTMLModElement>(null);
 
@@ -528,6 +635,7 @@ const AdminPanel = ({
 };
 
 export default function App() {
+  const isAdBlockEnabled = useAdBlockDetector();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -1405,7 +1513,9 @@ export default function App() {
   };
 
   return (
-    <div className={`flex bg-[#f8fafc] text-[#1e293b] font-sans ${activePage === 'admin' ? 'min-h-screen' : 'h-screen overflow-hidden'}`}>
+    <>
+      {isAdBlockEnabled && <AdBlockModal />}
+      <div className={`flex bg-[#f8fafc] text-[#1e293b] font-sans ${activePage === 'admin' ? 'min-h-screen' : 'h-screen overflow-hidden'}`}>
       {activePage === 'admin' ? (
         <AdminPanel 
           onSync={handleManualSync} 
@@ -2507,5 +2617,6 @@ export default function App() {
       </>
       )}
     </div>
+    </>
   );
 }
