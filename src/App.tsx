@@ -241,54 +241,53 @@ const useAdBlockDetector = () => {
   const [isAdBlockEnabled, setIsAdBlockEnabled] = useState(false);
 
   useEffect(() => {
-    let detectorTimer: any;
-    
+    let detectorTimer: NodeJS.Timeout;
+
     const detectAdBlocker = async () => {
       let isBlocked = false;
 
-      // Method 1: Check with a bait element that adblockers usually hide
-      const bait = document.createElement('div');
-      bait.className = 'adsbox pub_300x250 pub_300x250m pub_728x90 text-ad textAd text_ad text_ads text-ads text-ad-links flex';
-      bait.innerHTML = '&nbsp;';
-      bait.style.position = 'absolute';
-      bait.style.top = '-1000px';
-      bait.style.left = '-1000px';
-      
-      document.body.appendChild(bait);
-
-      // Wait a tiny bit for extensions to apply rules
-      await new Promise(res => setTimeout(res, 100));
-
-      const baitStyle = window.getComputedStyle(bait);
-      if (bait.offsetHeight === 0 || baitStyle.display === 'none') {
+      // Layer 1: Network Check
+      try {
+        await fetch('https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js', { 
+           method: 'HEAD',
+           mode: 'no-cors'
+        });
+      } catch (e) {
         isBlocked = true;
       }
 
-      document.body.removeChild(bait);
-
-      // Method 2: Check standard network request blocking (specifically for Brave shields)
+      // Layer 2: Cosmetic Check
       if (!isBlocked) {
-        try {
-          await fetch('https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js', { 
-             method: 'HEAD',
-             mode: 'no-cors'
-          });
-        } catch (e) {
+        const bait = document.createElement('div');
+        bait.className = 'textads banner-ads banner_ads ad-unit ad-zone ad-space adsbox';
+        bait.style.position = 'absolute';
+        bait.style.top = '-1000px';
+        bait.style.left = '-1000px';
+        bait.style.width = '10px';
+        bait.style.height = '10px';
+        
+        document.body.appendChild(bait);
+
+        await new Promise(res => requestAnimationFrame(res));
+
+        const baitStyle = window.getComputedStyle(bait);
+        if (bait.offsetHeight === 0 || baitStyle.display === 'none') {
           isBlocked = true;
         }
+
+        document.body.removeChild(bait);
       }
 
-      setIsAdBlockEnabled(isBlocked);
+      if (isBlocked) {
+        setIsAdBlockEnabled(true);
+        document.body.style.overflow = 'hidden'; // Prevent scrolling
+      }
     };
 
-    // Run check initially
-    detectAdBlocker();
-    
-    // Also periodically re-check in case they enable it after loading
-    detectorTimer = setInterval(detectAdBlocker, 5000);
+    detectorTimer = setTimeout(detectAdBlocker, 1500);
 
     return () => {
-      clearInterval(detectorTimer);
+      clearTimeout(detectorTimer);
     };
   }, []);
 
@@ -297,7 +296,7 @@ const useAdBlockDetector = () => {
 
 const AdBlockModal = () => {
   return (
-    <div className="fixed inset-0 z-[999999] flex items-center justify-center p-4 bg-[#0f172a]/95 backdrop-blur-md min-h-screen">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-[#0f172a]/95 backdrop-blur-md min-h-screen">
       <motion.div
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -345,7 +344,7 @@ const AdBlockModal = () => {
             className="w-full py-4 bg-slate-900 hover:bg-slate-800 rounded-xl text-white font-bold text-[15px] shadow-lg shadow-slate-200 transition-all transform hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-2"
           >
             <RefreshCw size={18} />
-            I have disabled it, Refresh
+            Reload Page
           </button>
         </div>
       </motion.div>
