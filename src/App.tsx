@@ -38,7 +38,8 @@ import {
   Sparkles,
   RefreshCw,
   AlertCircle,
-  Tag
+  Tag,
+  ShieldOff
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -296,45 +297,55 @@ const useAdBlockDetector = () => {
 
 const AdBlockModal = () => {
   return (
-    <div className="fixed inset-0 z-[999999] flex items-center justify-center p-4 bg-slate-900/95 backdrop-blur-xl min-h-screen relative overflow-hidden">
-      {/* Background patterned texture */}
-      <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: "url('data:image/svg+xml,%3Csvg width=\\'60\\' height=\\'60\\' viewBox=\\'0 0 60 60\\' xmlns=\\'http://www.w3.org/2000/svg\\'%3E%3Cg fill=\\'none\\' fill-rule=\\'evenodd\\'%3E%3Cg fill=\\'%23ffffff\\' fill-opacity=\\'1\\'%3E%3Cpath d=\\'M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z\\'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E')" }}></div>
-      
+    <div className="fixed inset-0 z-[999999] flex items-center justify-center p-4 bg-[#0f172a]/95 backdrop-blur-md min-h-screen">
       <motion.div
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        className="w-full max-w-md bg-white rounded-3xl overflow-hidden shadow-2xl relative block border border-red-100"
+        className="w-full max-w-[420px] bg-white rounded-3xl overflow-hidden shadow-2xl relative block border border-slate-100"
       >
-        <div className="flex flex-col items-center justify-center pt-8 pb-4">
-           <div className="bg-red-50 w-20 h-20 rounded-full flex items-center justify-center mb-4 ring-8 ring-red-50/50">
-             <ShieldOff size={36} className="text-red-500" strokeWidth={1.5} />
-           </div>
+        <div className="px-6 pt-10 pb-6 flex flex-col items-center relative overflow-hidden">
+           {/* Decorative elements */}
+           <div className="absolute top-[-50px] right-[-50px] w-32 h-32 bg-red-100 rounded-full blur-2xl opacity-50"></div>
+           <div className="absolute bottom-[-20px] left-[-20px] w-24 h-24 bg-rose-100 rounded-full blur-xl opacity-50"></div>
+
+           <motion.div 
+             animate={{ rotate: [-5, 5, -5] }}
+             transition={{ repeat: Infinity, duration: 4, ease: "easeInOut" }}
+             className="relative z-10 bg-gradient-to-br from-red-50 to-rose-50 w-24 h-24 rounded-full flex items-center justify-center mb-6 shadow-inner ring-4 ring-white"
+           >
+             <div className="bg-white w-16 h-16 rounded-full flex items-center justify-center shadow-sm">
+               <ShieldOff size={32} className="text-red-500" strokeWidth={1.5} />
+             </div>
+           </motion.div>
            
-           <h2 className="text-2xl font-black text-slate-800 tracking-tight text-center px-6">
-             Ads Blocker Detected!
+           <h2 className="text-2xl font-black text-slate-800 tracking-tight text-center relative z-10 mb-3">
+             Please Disable Ad Blocker
            </h2>
+
+           <p className="text-center text-slate-500 font-medium leading-relaxed relative z-10 text-[15px]">
+             We rely on ads to keep our content free for everyone. It looks like you're using an <strong className="text-red-500 font-bold">Ad Blocker</strong> or <strong className="text-orange-500 font-bold">Brave Shields</strong>.
+           </p>
         </div>
 
-        <div className="px-8 pb-8 flex flex-col items-center">
-          <p className="text-center text-slate-600 font-medium leading-relaxed mb-6">
-            We noticed you are using an <strong className="text-red-500 font-bold uppercase tracking-wide">Ad Blocker</strong> or <strong className="text-orange-500 font-bold">Brave Shields</strong>. Our website relies on ads to keep the content free for everyone.
-          </p>
-
-          <div className="bg-slate-50 border border-slate-100 rounded-2xl w-full p-5 mb-8">
+        <div className="px-6 pb-8 bg-slate-50/50 pt-6">
+          <div className="bg-white border text-sm text-slate-600 border-slate-100 rounded-2xl p-4 mb-6 shadow-sm">
              <div className="flex items-start gap-3">
-               <AlertCircle size={20} className="text-blue-500 mt-0.5 shrink-0" />
-               <div className="text-sm text-slate-600 text-left">
-                 <strong className="block text-slate-800 mb-1">How to access?</strong>
-                 Please disable your ad blocker or turn off Brave Shields for this site, then refresh the page to continue.
+               <div className="bg-blue-50 text-blue-500 rounded-full p-1.5 mt-0.5 shrink-0">
+                 <AlertCircle size={16} />
+               </div>
+               <div>
+                 <strong className="block text-slate-800 mb-0.5">How to proceed?</strong>
+                 <span className="opacity-90 leading-relaxed block">Disable your ad blocker for this site, and refresh the page to continue.</span>
                </div>
              </div>
           </div>
 
           <button 
             onClick={() => window.location.reload()}
-            className="w-full py-4 bg-gradient-to-r from-red-500 to-rose-500 hover:from-red-600 hover:to-rose-600 rounded-xl text-white font-bold text-lg shadow-lg shadow-red-200 transition-all transform hover:scale-[1.02] active:scale-[0.98]"
+            className="w-full py-4 bg-slate-900 hover:bg-slate-800 rounded-xl text-white font-bold text-[15px] shadow-lg shadow-slate-200 transition-all transform hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-2"
           >
-            I have disabled it. Refresh
+            <RefreshCw size={18} />
+            I have disabled it, Refresh
           </button>
         </div>
       </motion.div>
