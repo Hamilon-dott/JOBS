@@ -354,8 +354,6 @@ const AdBlockModal = () => {
 
 
 const DisplayAdComponent = React.memo(() => {
-  const adRef = useRef<HTMLModElement>(null);
-
   useEffect(() => {
     let isMounted = true;
     let pushAttempt = 0;
@@ -363,24 +361,26 @@ const DisplayAdComponent = React.memo(() => {
 
     const pushAd = () => {
       if (!isMounted) return;
-      if (adRef.current && adRef.current.offsetWidth > 0) {
-        try {
-          if (typeof window !== "undefined") {
-            const adsbygoogle = (window as any).adsbygoogle || [];
-            adsbygoogle.push({});
-          }
-        } catch (e: any) {
-          if (e.message && !e.message.includes('already have ads')) {
-            console.error("Google AdSense error:", e.message || e);
+      try {
+        if (typeof window !== "undefined") {
+          const adsbygoogle = (window as any).adsbygoogle || [];
+          adsbygoogle.push({});
+        }
+      } catch (e: any) {
+        if (e.message && !e.message.includes('already have ads')) {
+          console.error("Google AdSense error:", e.message || e);
+        } else if (e.message && e.message.includes('availableWidth=0')) {
+          // If width is 0, try again shortly
+          if (pushAttempt < 10) {
+            pushAttempt++;
+            timer = setTimeout(pushAd, 500);
           }
         }
-      } else if (pushAttempt < 10) {
-        pushAttempt++;
-        timer = setTimeout(pushAd, 300);
       }
     };
 
-    timer = setTimeout(pushAd, 300);
+    // Small delay to ensure React has flushed the DOM
+    timer = setTimeout(pushAd, 100);
 
     return () => {
       isMounted = false;
@@ -389,14 +389,13 @@ const DisplayAdComponent = React.memo(() => {
   }, []);
 
   return (
-    <div className="w-full bg-[#f8fafc] border border-dashed border-slate-200 rounded-xl my-6 relative flex flex-col min-h-[250px] min-w-[250px] overflow-hidden">
+    <div className="w-full bg-[#f8fafc] border border-dashed border-slate-200 rounded-xl my-6 relative flex flex-col min-h-[250px] overflow-hidden">
       <div className="absolute top-0 right-0 text-[10px] text-[#94a3b8] font-bold tracking-wider uppercase bg-white border-b border-l border-slate-100 rounded-bl px-2.5 py-0.5 z-10 shadow-sm select-none">
         বিজ্ঞাপন
       </div>
-      <div className="w-full mt-[18px] min-h-[250px] overflow-hidden block relative flex justify-center">
+      <div className="w-full mt-[18px] min-h-[250px] overflow-hidden block relative">
         <ins className="adsbygoogle"
-             ref={adRef}
-             style={{ display: "block" }}
+             style={{ display: "block", width: "100%", height: "100%", minHeight: "250px" }}
              data-ad-client="ca-pub-7608093638667157"
              data-ad-slot="8382578589"
              data-ad-format="auto"
@@ -404,7 +403,7 @@ const DisplayAdComponent = React.memo(() => {
       </div>
     </div>
   );
-}, () => true);
+});
 
 declare global {
   interface Window {
