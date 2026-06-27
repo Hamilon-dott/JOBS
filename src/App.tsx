@@ -395,7 +395,7 @@ const DisplayAdComponent = React.memo(() => {
       </div>
       <div className="w-full mt-[18px] min-h-[250px] overflow-hidden block relative">
         <ins className="adsbygoogle"
-             style={{ display: "block", width: "100%", height: "100%", minHeight: "250px" }}
+             style={{ display: "block" }}
              data-ad-client="ca-pub-7608093638667157"
              data-ad-slot="8382578589"
              data-ad-format="auto"
@@ -1047,12 +1047,8 @@ export default function App() {
         if (!jobSummaries[selectedJob.id]) {
           generateSummary(selectedJob);
         }
-        if (selectedJob.imageUrls && selectedJob.imageUrls.length > 0) {
-          setIsJobDetailLoading(true);
-          setLoadedImagesCount(0);
-        } else {
-          setIsJobDetailLoading(false);
-        }
+        // Let images load naturally in the DOM without blocking the UI
+        setIsJobDetailLoading(false);
       }
     }
   }, [selectedJob]);
@@ -2253,25 +2249,8 @@ export default function App() {
                           </div>
                         </div>
                         <div className="text-center">
-                          <p className="text-sm font-bold text-[#0f172a] mb-1">Circular images are loading...</p>
-                          <p className="text-xs text-[#64748b]">Please wait while we fetch high-quality data</p>
-                        </div>
-                        
-                        {selectedJob.imageUrls && (
-                          <div className="w-48 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                            <motion.div 
-                              className="h-full bg-[#3b82f6]"
-                              initial={{ width: 0 }}
-                              animate={{ width: `${(loadedImagesCount / Math.max(selectedJob.imageUrls.length, 1)) * 100}%` }}
-                            />
-                          </div>
-                        )}
-                        
-                        {/* Off-screen images to trigger loading */}
-                        <div style={{ position: 'absolute', width: 0, height: 0, overflow: 'hidden', opacity: 0 }}>
-                          {selectedJob.imageUrls?.map((url, idx) => (
-                            <img key={idx} src={url} alt={`Preload ${idx}`} onLoad={handleImageLoad} onError={handleImageLoad} referrerPolicy="no-referrer" />
-                          ))}
+                          <p className="text-sm font-bold text-[#0f172a] mb-1">Loading circular details...</p>
+                          <p className="text-xs text-[#64748b]">Please wait while we fetch the latest data</p>
                         </div>
                       </motion.div>
                     ) : (
