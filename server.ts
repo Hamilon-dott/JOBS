@@ -115,8 +115,8 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
   <url>
     <loc>${host}/jobs/${job.slug || generateSlug(job.title, job.organization, job.id)}</loc>
     <lastmod>${new Date(job.publishedDate).toISOString().split('T')[0]}</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
+    <changefreq>daily</changefreq>
+    <priority>0.9</priority>
   </url>`).join('')}
 </urlset>`;
 
@@ -706,11 +706,6 @@ function processWpPost(post: any, sourceName: string, thirtyDaysAgo: Date, today
 
   const deadline = extractFromTableOrText(['আবেদনের শেষ তারিখ', 'আবেদনের শেষ সময়', 'আবেদন শেষ', 'Last Date', 'Deadline']) || "সার্কুলার দেখুন";
   const deadlineDate = parseDeadline(deadline);
-  
-  // STRICT FILTER: Skip if deadline passed more than 30 days ago
-  if (deadlineDate && deadlineDate < thirtyDaysAgo) {
-    return null; 
-  }
 
   // Extract custom publication date from post content when available, with fallback to post create date
   let customPubDate: Date | null = null;
@@ -725,14 +720,9 @@ function processWpPost(post: any, sourceName: string, thirtyDaysAgo: Date, today
     }
   }
 
-  // Fallback: Skip very old posts (published > 90 days ago) if deadline is unknown
+  // Use custom publication date or fallback to post create date
   const postPubDate = new Date(post.date_gmt && post.date_gmt !== '0001-11-30T00:00:00' ? `${post.date_gmt}Z` : post.date);
   const pubDate = customPubDate || postPubDate;
-  const ninetyDaysAgo = new Date();
-  ninetyDaysAgo.setDate(today.getDate() - 90);
-  if (pubDate < ninetyDaysAgo && (!deadlineDate || deadlineDate < today)) {
-     return null;
-  }
 
   // Improved Image Extraction (Multiple)
   const imgMatches = rawContent.matchAll(/src=["']([^"'>]+\.(?:jpg|jpeg|png|webp|gif)[^"'>]*)["']/gi);
@@ -853,8 +843,8 @@ async function fetchJobsFromWP(isFull: boolean = false, forceRefresh: boolean = 
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(today.getDate() - 30);
   
-  const targetCount = isFull ? 300 : 40;
-  const maxSearchPages = isFull ? 15 : 2; // Increase page limit to account for filtered items
+  const targetCount = isFull ? 5000 : 60;
+  const maxSearchPages = isFull ? 50 : 2; // Increase page limit to account for all items
 
   for (const source of sources) {
     try {
