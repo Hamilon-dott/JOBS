@@ -161,8 +161,8 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
   app.get('/api/sync-firebase', async (req, res) => {
     try {
       const isFull = req.query.full === 'true';
-      // Always force full refresh for cache consistency
-      const updatedJobs = await fetchJobsFromWP(true, true);
+      // Force refresh of cache
+      const updatedJobs = await fetchJobsFromWP(isFull, true);
       const jobsFilePath = path.join(os.tmpdir(), 'jobs.json');
       await fs.promises.writeFile(jobsFilePath, JSON.stringify(updatedJobs, null, 2), 'utf8');
       
@@ -171,9 +171,7 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
       cachedJobsBrief = null;
       singleJobMapCache.clear();
 
-      // If user requested partial, only return partial list length
-      const returnCount = isFull ? updatedJobs.length : Math.min(updatedJobs.length, 40);
-      res.json({ success: true, count: returnCount, skipped: 0 });
+      res.json({ success: true, count: updatedJobs.length, skipped: 0 });
     } catch (error) {
       console.error('Error syncing:', error);
       res.status(500).json({ error: 'Failed to sync to cache' });
@@ -674,7 +672,7 @@ const parseBengaliDate = (dateStr: string): Date | null => {
 };
 
 // Function to process a WordPress post into a Job object
-function processWpPost(post: any, sourceName: string, cutoffDate: Date, today: Date, parseDeadline: Function) {
+function processWpPost(post: any, sourceName: string, thirtyDaysAgo: Date, today: Date, parseDeadline: Function) {
   const title = post.title?.rendered || "Job Circular";
   const titleText = title.replace(/&#8211;/g, '-').replace(/&#8217;/g, "'").replace(/<\/?[^>]+(>|$)/g, "").trim();
 
@@ -709,10 +707,10 @@ function processWpPost(post: any, sourceName: string, cutoffDate: Date, today: D
   const deadline = extractFromTableOrText(['আবেদনের শেষ তারিখ', 'আবেদনের শেষ সময়', 'আবেদন শেষ', 'Last Date', 'Deadline']) || "সার্কুলার দেখুন";
   const deadlineDate = parseDeadline(deadline);
   
-  // STRICT FILTER: Skip if deadline passed before cutoffDate
-  // if (deadlineDate && deadlineDate < cutoffDate) {
-  //  return null; 
-  // }
+  // STRICT FILTER: Skip if deadline passed more than 30 days ago
+  if (deadlineDate && deadlineDate < thirtyDaysAgo) {
+    return null; 
+  }
 
   // Extract custom publication date from post content when available, with fallback to post create date
   let customPubDate: Date | null = null;
@@ -727,14 +725,14 @@ function processWpPost(post: any, sourceName: string, cutoffDate: Date, today: D
     }
   }
 
-  // Fallback: Skip very old posts (published > 365 days ago) if deadline is passed or unknown
+  // Fallback: Skip very old posts (published > 90 days ago) if deadline is unknown
   const postPubDate = new Date(post.date_gmt && post.date_gmt !== '0001-11-30T00:00:00' ? `${post.date_gmt}Z` : post.date);
   const pubDate = customPubDate || postPubDate;
-  const fallbackCutoffDate = new Date();
-  fallbackCutoffDate.setDate(today.getDate() - 365);
-  // if (pubDate < fallbackCutoffDate && (!deadlineDate || deadlineDate < today)) {
-  //    return null;
-  // }
+  const ninetyDaysAgo = new Date();
+  ninetyDaysAgo.setDate(today.getDate() - 90);
+  if (pubDate < ninetyDaysAgo && (!deadlineDate || deadlineDate < today)) {
+     return null;
+  }
 
   // Improved Image Extraction (Multiple)
   const imgMatches = rawContent.matchAll(/src=["']([^"'>]+\.(?:jpg|jpeg|png|webp|gif)[^"'>]*)["']/gi);
@@ -852,12 +850,10 @@ async function fetchJobsFromWP(isFull: boolean = false, forceRefresh: boolean = 
 
   const seenTitles = new Set();
   const today = new Date();
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(today.getDate() - 30);
   
-  // Keep jobs for up to 365 days so they stay indexed in Google Search Console
-  const expiryDateForSearchConsole = new Date();
-  expiryDateForSearchConsole.setDate(today.getDate() - 365);
-  
-  const targetCount = isFull ? 500 : 40;
+  const targetCount = isFull ? 300 : 40;
   const maxSearchPages = isFull ? 15 : 2; // Increase page limit to account for filtered items
 
   for (const source of sources) {
@@ -882,7 +878,7 @@ async function fetchJobsFromWP(isFull: boolean = false, forceRefresh: boolean = 
             if (seenTitles.has(titleText.toLowerCase())) return;
             seenTitles.add(titleText.toLowerCase());
 
-            const job = processWpPost(post, source.name, expiryDateForSearchConsole, today, parseDeadline);
+            const job = processWpPost(post, source.name, thirtyDaysAgo, today, parseDeadline);
             if (job) jobs.push(job);
           });
           console.log(`Page ${page} Result: We now have ${jobs.length} valid jobs total.`);
@@ -1053,15 +1049,15 @@ async function fetchSingleJob(slugOrId: string) {
     
     if (post) {
       const today = new Date();
-      const cutoffDateForSingle = new Date();
-      cutoffDateForSingle.setDate(today.getDate() - 3650); // 10 years ago to ensure it always returns
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(today.getDate() - 30);
       
       const parseLib = (str: string) => {
         // dummy parser returning null to bypass deadline filter, since it's a specific requested post
         return null; 
       };
 
-      const job = processWpPost(post, 'BD Govt Job', cutoffDateForSingle, today, parseLib);
+      const job = processWpPost(post, 'BD Govt Job', thirtyDaysAgo, today, parseLib);
       if (job) {
         singleJobMapCache.set(slugOrId, { job: job, timestamp: now });
         return job;
