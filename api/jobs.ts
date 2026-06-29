@@ -173,11 +173,9 @@ async function fetchLatestJobs(isFull: boolean = false) {
 
   const seenTitles = new Set();
   const today = new Date();
-  const thirtyDaysAgo = new Date();
-  thirtyDaysAgo.setDate(today.getDate() - 30);
   
-  const targetCount = isFull ? 350 : 40;
-  const maxSearchPages = isFull ? 8 : 2;
+  const targetCount = isFull ? 500 : 100;
+  const maxSearchPages = isFull ? 20 : 3;
 
   for (const source of sources) {
     try {
@@ -232,16 +230,8 @@ async function fetchLatestJobs(isFull: boolean = false) {
 
             const deadline = extractFromTableOrText(['আবেদনের শেষ তারিখ', 'আবেদনের শেষ সময়', 'আবেদন শেষ', 'Last Date', 'Deadline']) || "সার্কুলার দেখুন";
             const deadlineDate = parseDeadline(deadline);
-            if (deadlineDate && deadlineDate < thirtyDaysAgo) {
-              return; 
-            }
 
             const pubDate = new Date(post.date);
-            const ninetyDaysAgo = new Date();
-            ninetyDaysAgo.setDate(today.getDate() - 90);
-            if (pubDate < ninetyDaysAgo && (!deadlineDate || deadlineDate < today)) {
-               return;
-            }
 
             seenTitles.add(titleText.toLowerCase());
 

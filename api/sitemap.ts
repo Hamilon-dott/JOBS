@@ -37,8 +37,8 @@ function generateSlug(title: string, orgName?: string | null, fallbackId?: strin
 async function fetchJobSlugs() {
   const slugs: string[] = [];
   try {
-    // Fetch top 3 pages (300 jobs) to keep it fast and reliable
-    for (let page = 1; page <= 3; page++) {
+    // Fetch top 5 pages (500 jobs) to keep it fast and reliable
+    for (let page = 1; page <= 5; page++) {
       const response = await axios.get(`https://bdgovtjob.net/wp-json/wp/v2/posts?per_page=100&page=${page}`, { 
         httpsAgent,
         timeout: 8000,
@@ -90,8 +90,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   <url>
     <loc>${baseUrl}/${slug}</loc>
     <lastmod>${date}</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
+    <changefreq>daily</changefreq>
+    <priority>0.9</priority>
   </url>`).join('')}
 </urlset>`;
 
