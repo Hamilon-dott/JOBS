@@ -1980,7 +1980,7 @@ export default function App() {
                           e.preventDefault();
                           setSelectedJob(job);
                         }}
-                        className="bg-white text-left text-inherit block border border-[#e2e8f0] rounded-lg p-3 flex flex-col md:flex-row md:items-center justify-between group hover:border-[#3b82f6]/50 hover:shadow-md transition-all duration-200 gap-3 cursor-pointer"
+                        className="bg-white text-left text-inherit block border border-[#e2e8f0] rounded-lg p-3 flex flex-col md:flex-row md:items-center justify-between group hover:border-[#3b82f6]/50 hover:shadow-md transition-all duration-200 gap-3 cursor-pointer content-vis-auto"
                       >
                         <div className="flex items-center gap-3 md:gap-4 mb-4 md:mb-6">
                           <div className={cn(
