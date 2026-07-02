@@ -4,6 +4,12 @@
 @theme {
   --font-sans: "Anek Bangali", "Noto Sans Bengali", "Hind Siliguri", "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --animate-marquee: marquee 50s linear infinite;
+
+  @keyframes marquee {
+    0% { transform: translateX(100vw); }
+    100% { transform: translateX(-100%); }
+  }
 }
 
 @layer utilities {

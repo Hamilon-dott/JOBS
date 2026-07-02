@@ -669,6 +669,7 @@ export default function App() {
 
 
   const scrollContainerRef = React.useRef<HTMLDivElement>(null);
+  const scrollPositionRef = React.useRef<number>(0);
   const selectedJobRef = React.useRef(selectedJob);
   const showExitConfirmRef = React.useRef(showExitConfirm);
   const activePageRef = React.useRef(activePage);
@@ -1410,9 +1411,21 @@ export default function App() {
     setCurrentPage(1);
   }, [searchTerm, activeFilter, filterCategory, filterDeadline, filterPublishDate]);
 
+  // Restore scroll position when returning to the job list
+  useEffect(() => {
+    if (!selectedJob && activePage === 'home') {
+      const timer = setTimeout(() => {
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollTo({ top: scrollPositionRef.current, behavior: 'auto' });
+        }
+      }, 350); // wait for AnimatePresence mode="wait" to finish (300ms)
+      return () => clearTimeout(timer);
+    }
+  }, [selectedJob, activePage]);
+
   // Scroll to top on page change
   useEffect(() => {
-    if (scrollContainerRef.current) {
+    if (scrollContainerRef.current && !selectedJob) {
       scrollContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
     }
   }, [currentPage]);
@@ -1531,7 +1544,33 @@ export default function App() {
   return (
     <>
       {isAdBlockEnabled && <AdBlockModal />}
-      <div className={`flex bg-[#f8fafc] text-[#1e293b] font-sans ${activePage === 'admin' ? 'min-h-screen' : 'h-screen overflow-hidden'}`}>
+      <div className={`flex flex-col bg-[#f8fafc] text-[#1e293b] font-sans ${activePage === 'admin' ? 'min-h-screen' : 'h-screen overflow-hidden'}`}>
+        
+        {/* Scrolling Ticker */}
+        {activePage !== 'admin' && !isClosing && !selectedJob && (
+          <div className="bg-indigo-900 text-indigo-50 py-2.5 overflow-hidden flex items-center border-b border-indigo-950 shrink-0 shadow-inner z-[200] relative">
+            <div className="min-w-max shrink-0 whitespace-nowrap animate-marquee font-medium text-sm md:text-base tracking-wide flex gap-4 items-center">
+              <span>যেকোনো শ্রেণীর গাইডবই ডাউনলোড করুন: <a href="https://guide.talukdaracademy.com.bd" className="text-yellow-300 hover:underline font-bold" target="_blank" rel="noopener noreferrer">guide.talukdaracademy.com.bd</a></span>
+              <span className="text-indigo-400">||</span>
+              
+              <span>সকল চাকরির বিজ্ঞপ্তি: <a href="https://jobs.talukdaracademy.com.bd" className="text-yellow-300 hover:underline font-bold" target="_blank" rel="noopener noreferrer">jobs.talukdaracademy.com.bd</a></span>
+              <span className="text-indigo-400">||</span>
+              
+              <span>ঢাকা সিটি বাস ভাড়া: <a href="https://busvara.talukdaracademy.com.bd" className="text-yellow-300 hover:underline font-bold" target="_blank" rel="noopener noreferrer">busvara.talukdaracademy.com.bd</a></span>
+              <span className="text-indigo-400">||</span>
+              
+              <span>বাংলাদেশ প্রাইজবন্ড রেজাল্ট চেক: <a href="https://bond.talukdaracademy.com.bd" className="text-yellow-300 hover:underline font-bold" target="_blank" rel="noopener noreferrer">bond.talukdaracademy.com.bd</a></span>
+              <span className="text-indigo-400">||</span>
+              
+              <span>চাকরির পরীক্ষার সীট প্ল্যান: <a href="https://ecf.talukdaracademy.com.bd" className="text-yellow-300 hover:underline font-bold" target="_blank" rel="noopener noreferrer">ecf.talukdaracademy.com.bd</a></span>
+              <span className="text-indigo-400">||</span>
+              
+              <span>এনবিআর টিন (TIN) অডিট চেকার: <a href="https://nbr.talukdaracademy.com.bd" className="text-yellow-300 hover:underline font-bold" target="_blank" rel="noopener noreferrer">nbr.talukdaracademy.com.bd</a></span>
+            </div>
+          </div>
+        )}
+
+        <div className="flex flex-1 overflow-hidden relative">
       {activePage === 'admin' ? (
         <AdminPanel 
           onSync={handleManualSync} 
@@ -1614,7 +1653,12 @@ export default function App() {
             <div className="p-6 flex flex-col justify-between h-full bg-[#0f172a] overflow-y-auto custom-scrollbar">
               <div className="flex-1 flex flex-col">
                 <div className="flex items-center justify-between mb-10 selection:bg-none">
-                  <div className="flex items-center gap-3 cursor-pointer" onClick={() => { setActivePage('home'); setSelectedJob(null); setIsSidebarOpen(false); window.scrollTo({top: 0, behavior: 'smooth'}); }}>
+                  <div className="flex items-center gap-3 cursor-pointer" onClick={() => { 
+                    setActivePage('home'); 
+                    setSelectedJob(null); 
+                    setIsSidebarOpen(false); 
+                    if (scrollContainerRef.current) scrollContainerRef.current.scrollTo({top: 0, behavior: 'smooth'}); 
+                  }}>
                     <div className="bg-[#3b82f6] w-10 h-10 rounded-lg flex items-center justify-center text-white shrink-0">
                       <Briefcase size={20} />
                     </div>
@@ -1732,7 +1776,11 @@ export default function App() {
                   <div className="w-5 md:w-6 h-0.5 bg-current"></div>
                 </div>
               </button>
-              <div className="md:hidden flex items-center cursor-pointer" onClick={() => { setActivePage('home'); setSelectedJob(null); window.scrollTo({top: 0, behavior: 'smooth'}); }}>
+              <div className="md:hidden flex items-center cursor-pointer" onClick={() => { 
+                setActivePage('home'); 
+                setSelectedJob(null); 
+                if (scrollContainerRef.current) scrollContainerRef.current.scrollTo({top: 0, behavior: 'smooth'}); 
+              }}>
                 <div className="flex items-center gap-1.5 font-bold text-slate-700">
                   <div className="bg-[#3b82f6] w-7 h-7 rounded-lg flex items-center justify-center text-white">
                     <Briefcase size={16} />
@@ -1745,7 +1793,11 @@ export default function App() {
                   </div>
                 </div>
               </div>
-              <div className="hidden md:flex items-center ml-2 cursor-pointer" onClick={() => { setActivePage('home'); setSelectedJob(null); window.scrollTo({top: 0, behavior: 'smooth'}); }}>
+              <div className="hidden md:flex items-center ml-2 cursor-pointer" onClick={() => { 
+                setActivePage('home'); 
+                setSelectedJob(null); 
+                if (scrollContainerRef.current) scrollContainerRef.current.scrollTo({top: 0, behavior: 'smooth'}); 
+              }}>
                 <div className="flex items-center gap-2 font-bold text-slate-700">
                   <div className="bg-[#3b82f6] w-10 h-10 rounded-lg flex items-center justify-center text-white">
                     <Briefcase size={20} />
@@ -1978,7 +2030,15 @@ export default function App() {
                         key={job.id}
                         onClick={(e) => {
                           e.preventDefault();
+                          if (scrollContainerRef.current) {
+                            scrollPositionRef.current = scrollContainerRef.current.scrollTop;
+                          }
                           setSelectedJob(job);
+                          setTimeout(() => {
+                            if (scrollContainerRef.current) {
+                              scrollContainerRef.current.scrollTo(0, 0);
+                            }
+                          }, 10);
                         }}
                         className="bg-white text-left text-inherit block border border-[#e2e8f0] rounded-lg p-3 flex flex-col md:flex-row md:items-center justify-between group hover:border-[#3b82f6]/50 hover:shadow-md transition-all duration-200 gap-3 cursor-pointer content-vis-auto"
                       >
@@ -2151,7 +2211,7 @@ export default function App() {
             <footer className="mt-8 py-8 text-center text-slate-500 border-t border-slate-200">
               <HistatsCounter />
               <div className="flex flex-col md:flex-row items-center justify-between gap-4 max-w-5xl mx-auto px-4 mt-6">
-                <div className="text-sm font-medium">© {toBengaliNumber(new Date().getFullYear())} <span className="cursor-pointer hover:text-blue-600 transition-colors" onClick={() => { setActivePage('home'); setSelectedJob(null); window.scrollTo({top: 0, behavior: 'smooth'}); }}>Jobs.talukdaracademy.com.bd</span>. All rights reserved.</div>
+                <div className="text-sm font-medium">© {toBengaliNumber(new Date().getFullYear())} <span className="cursor-pointer hover:text-blue-600 transition-colors" onClick={() => { setActivePage('home'); setSelectedJob(null); if (scrollContainerRef.current) scrollContainerRef.current.scrollTo({top: 0, behavior: 'smooth'}); }}>Jobs.talukdaracademy.com.bd</span>. All rights reserved.</div>
                 <div className="flex flex-wrap items-center justify-center gap-4 text-sm font-medium">
                   <button onClick={() => { setActivePage('privacy'); setSelectedJob(null); }} className="hover:text-blue-600 transition-colors hover:underline">Privacy Policy</button>
                   <button onClick={() => { setActivePage('terms'); setSelectedJob(null); }} className="hover:text-blue-600 transition-colors hover:underline">Terms of Service</button>
@@ -2182,8 +2242,11 @@ export default function App() {
                           <span>ফিরে যান</span>
                         </button>
 
-                        <div className="flex flex-col items-start pointer-events-none min-w-0">
-                          <span className="text-[10px] md:text-[17px] font-black tracking-tighter animate-rgb-glow whitespace-nowrap uppercase truncate drop-shadow-sm">
+                        <div 
+                          className="flex flex-col items-start min-w-0 cursor-pointer"
+                          onClick={() => setSelectedJob(null)}
+                        >
+                          <span className="text-[10px] md:text-[17px] font-black tracking-tighter animate-rgb-glow whitespace-nowrap uppercase truncate drop-shadow-sm hover:text-[#3b82f6] transition-colors pointer-events-auto">
                             Jobs.talukdaracademy
                           </span>
                           <div className="h-[1.5px] md:h-[2.5px] w-8 md:w-20 bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 rounded-full opacity-40 mt-0.5" />
@@ -2632,6 +2695,7 @@ export default function App() {
       <ScrollButtons containerRef={scrollContainerRef} />
       </>
       )}
+      </div>
     </div>
     </>
   );
