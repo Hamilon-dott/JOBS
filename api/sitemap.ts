@@ -37,8 +37,8 @@ function generateSlug(title: string, orgName?: string | null, fallbackId?: strin
 async function fetchJobSlugs() {
   const slugs: string[] = [];
   try {
-    // Fetch top 5 pages (500 jobs) to keep it fast and reliable
-    for (let page = 1; page <= 5; page++) {
+    // Fetch top 10 pages (1000 jobs) to keep it fast and reliable
+    for (let page = 1; page <= 10; page++) {
       const response = await axios.get(`https://bdgovtjob.net/wp-json/wp/v2/posts?per_page=100&page=${page}`, { 
         httpsAgent,
         timeout: 8000,
