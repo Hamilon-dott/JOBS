@@ -354,6 +354,8 @@ const AdBlockModal = () => {
 
 
 const DisplayAdComponent = React.memo(() => {
+  const adKey = React.useRef(`ad-${Math.random().toString(36).substring(2, 9)}`).current;
+
   useEffect(() => {
     let isMounted = true;
     let pushAttempt = 0;
@@ -380,7 +382,7 @@ const DisplayAdComponent = React.memo(() => {
     };
 
     // Small delay to ensure React has flushed the DOM
-    timer = setTimeout(pushAd, 100);
+    timer = setTimeout(pushAd, 300);
 
     return () => {
       isMounted = false;
@@ -395,6 +397,7 @@ const DisplayAdComponent = React.memo(() => {
       </div>
       <div className="w-full mt-[18px] min-h-[250px] overflow-hidden block relative">
         <ins className="adsbygoogle"
+             key={adKey}
              style={{ display: "block", width: "100%", height: "100%", minHeight: "250px" }}
              data-ad-client="ca-pub-7608093638667157"
              data-ad-slot="8382578589"

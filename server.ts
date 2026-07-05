@@ -162,7 +162,7 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
     try {
       const isFull = req.query.full === 'true';
       // Force refresh of cache
-      const updatedJobs = await fetchJobsFromWP(isFull, true);
+      const updatedJobs = await fetchJobsFromWP(true, true);
       const jobsFilePath = path.join(os.tmpdir(), 'jobs.json');
       await fs.promises.writeFile(jobsFilePath, JSON.stringify(updatedJobs, null, 2), 'utf8');
       
@@ -444,12 +444,14 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
                 updatedHtml = updatedHtml.replace('<body>', `<body>\n${staticContent}`);
               }
             } else {
-              // Job not found, revert to fallback home page canonical
-              canonicalUrl = host + '/';
+              // Job not found, return 404 and use current path for canonical
+              res.status(404);
+              canonicalUrl = host + reqPath;
             }
           } catch (e) {
             console.error('Failed to fetch job for SEO rendering:', e);
-            canonicalUrl = host + '/';
+            res.status(503); // Service Unavailable, prevent Google from de-indexing due to temporary API failures
+            canonicalUrl = host + reqPath;
           }
         } else {
           // Homepage or other pages
@@ -970,6 +972,10 @@ async function fetchLatestJobs(isFull: boolean = false, isAdmin: boolean = false
       const data = await fs.promises.readFile(jobsFilePath, 'utf8');
       const jobs = JSON.parse(data);
       if (Array.isArray(jobs) && jobs.length > 0) {
+        if (isFull && jobs.length < 300) {
+           console.log("Cached jobs.json does not have enough items for full fetch. Ignoring file cache.");
+           return await fetchJobsFromWP(isFull);
+        }
         return jobs;
       }
     }
