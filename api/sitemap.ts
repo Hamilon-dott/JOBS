@@ -37,16 +37,27 @@ function generateSlug(title: string, orgName?: string | null, fallbackId?: strin
 async function fetchJobSlugs() {
   const slugs: string[] = [];
   try {
-    // Fetch top 10 pages (1000 jobs) to keep it fast and reliable
+    // Fetch top 10 pages (1000 jobs) concurrently to prevent serverless timeouts
+    const pageRequests = [];
     for (let page = 1; page <= 10; page++) {
-      const response = await axios.get(`https://bdgovtjob.net/wp-json/wp/v2/posts?per_page=100&page=${page}`, { 
-        httpsAgent,
-        timeout: 8000,
-        headers: { 
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' 
-        }
-      });
-      if (Array.isArray(response.data)) {
+      pageRequests.push(
+        axios.get(`https://bdgovtjob.net/wp-json/wp/v2/posts?per_page=100&page=${page}`, { 
+          httpsAgent,
+          timeout: 10000,
+          headers: { 
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' 
+          }
+        }).catch(e => {
+          console.error(`Sitemap fetch page ${page} failed`, e.message);
+          return null; // Return null so Promise.all still resolves for other pages
+        })
+      );
+    }
+    
+    const responses = await Promise.all(pageRequests);
+    
+    responses.forEach(response => {
+      if (response && response.data && Array.isArray(response.data)) {
         response.data.forEach((post: any) => {
           let titleText = post.title?.rendered || '';
           titleText = titleText.replace(/&#[0-9]+;/g, '-').replace(/<[^>]+>/g, '').trim();
@@ -61,14 +72,12 @@ async function fetchJobSlugs() {
           
           slugs.push(generateSlug(titleText, orgName, post.slug || post.id.toString()));
         });
-      } else {
-        break;
       }
-    }
+    });
   } catch (e) {
     console.error('Sitemap fetch failed', e);
   }
-  return slugs;
+  return [...new Set(slugs)]; // return unique slugs
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

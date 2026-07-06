@@ -1553,10 +1553,10 @@ export default function App() {
               <span>যেকোনো শ্রেণীর গাইডবই ডাউনলোড করুন: <a href="https://guide.talukdaracademy.com.bd" className="text-yellow-300 hover:underline font-bold" target="_blank" rel="noopener noreferrer">guide.talukdaracademy.com.bd</a></span>
               <span className="text-indigo-400">||</span>
               
-              <span>সকল চাকরির বিজ্ঞপ্তি: <a href="https://jobs.talukdaracademy.com.bd" className="text-yellow-300 hover:underline font-bold" target="_blank" rel="noopener noreferrer">jobs.talukdaracademy.com.bd</a></span>
-              <span className="text-indigo-400">||</span>
-              
               <span>ঢাকা সিটি বাস ভাড়া: <a href="https://busvara.talukdaracademy.com.bd" className="text-yellow-300 hover:underline font-bold" target="_blank" rel="noopener noreferrer">busvara.talukdaracademy.com.bd</a></span>
+              <span className="text-indigo-400">||</span>
+
+              <span>যেকোনো শ্রেণীর পাঠ্যবই ডাউনলোড করুন: <a href="https://nctb.talukdaracademy.com.bd" className="text-yellow-300 hover:underline font-bold">nctb.talukdaracademy.com.bd</a></span>
               <span className="text-indigo-400">||</span>
               
               <span>বাংলাদেশ প্রাইজবন্ড রেজাল্ট চেক: <a href="https://bond.talukdaracademy.com.bd" className="text-yellow-300 hover:underline font-bold" target="_blank" rel="noopener noreferrer">bond.talukdaracademy.com.bd</a></span>
@@ -1803,9 +1803,9 @@ export default function App() {
                     <Briefcase size={20} />
                   </div>
                   <div className="flex flex-col">
-                    <span className="text-[16px] font-black tracking-tight animate-rgb-glow uppercase whitespace-nowrap">
+                    <h1 className="text-[16px] font-black tracking-tight animate-rgb-glow uppercase whitespace-nowrap m-0">
                       Jobs.talukdaracademy.com.bd
-                    </span>
+                    </h1>
                     <div className="h-[2px] w-12 bg-blue-400/40 rounded-full mt-0.5" />
                   </div>
                 </div>
@@ -2210,7 +2210,11 @@ export default function App() {
             {/* Footer */}
             <footer className="mt-8 py-8 text-center text-slate-500 border-t border-slate-200">
               <HistatsCounter />
-              <div className="flex flex-col md:flex-row items-center justify-between gap-4 max-w-5xl mx-auto px-4 mt-6">
+              <div className="max-w-5xl mx-auto px-4 mt-6 mb-4 text-[10px] sm:text-xs text-slate-400 text-center sm:text-left leading-relaxed font-sans">
+                <span className="font-semibold text-slate-500 mb-1 block">Top Searches & Keywords:</span>
+                Private job circular 2026 Bangladesh, Bangladesh government Job Circular 2026, Bangladesh Job Circular 2026, BD Job Circular 2026 apply online, NGO Job Circular 2026 Bangladesh, Bangladesh Job circular 2026 last date, Recent Job Circular 2026, Private Job Circular 2026 Bangladesh pdf, Govt job circular bangla cyber, BD Jobs apply online, Government jobs for HSC passed in Bangladesh, job circular 2026, bd job circular, govt job circular, job circular bd, job circular 2026 bangladesh, bangladesh job circular 2026, bd job circular 2026, job circular 2025, bank job circular, govt job circular 2026, somaj seba job circular, all job circular, police job circular 2026, somaj seba job circular 2026, asi job circular, teletalk, teletalk job, teletalk job circular, bank job circular 2026, asi job circular 2026, ngo job circular, all job circular 2026, government job circular, ngo job circular 2026, navy job circular 2026, new job circular, army job circular 2026, brac job circular, brac, bangladesh bank, bangladesh bank job circular, asi police job circular 2026, dss job circular, dss, modc job circular 2026, police asi job circular 2026, bd govt job circular, government job circular 2026, somaj seba odhidoptor job circular 2026, all govt job circular, bdjobs, new job circular 2026, dss job circular 2026, fire service job circular, gov job circular 2026, bangladesh police, brac job circular 2026, bangladesh police job circular 2026, fire service job circular 2026, bd jobs.
+              </div>
+              <div className="flex flex-col md:flex-row items-center justify-between gap-4 max-w-5xl mx-auto px-4 mt-2">
                 <div className="text-sm font-medium">© {toBengaliNumber(new Date().getFullYear())} <span className="cursor-pointer hover:text-blue-600 transition-colors" onClick={() => { setActivePage('home'); setSelectedJob(null); if (scrollContainerRef.current) scrollContainerRef.current.scrollTo({top: 0, behavior: 'smooth'}); }}>Jobs.talukdaracademy.com.bd</span>. All rights reserved.</div>
                 <div className="flex flex-wrap items-center justify-center gap-4 text-sm font-medium">
                   <button onClick={() => { setActivePage('privacy'); setSelectedJob(null); }} className="hover:text-blue-600 transition-colors hover:underline">Privacy Policy</button>
