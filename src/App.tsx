@@ -1411,6 +1411,18 @@ export default function App() {
     setCurrentPage(1);
   }, [searchTerm, activeFilter, filterCategory, filterDeadline, filterPublishDate]);
 
+  // Scroll to top on page change or job selection
+  useEffect(() => {
+    // We want to scroll to top whenever we enter a new view.
+    // admin and selectedJob act as distinct pages.
+    if (activePage === 'admin' || selectedJob) {
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollTo({ top: 0, behavior: 'instant' });
+      }
+      window.scrollTo({ top: 0, behavior: 'instant' });
+    }
+  }, [activePage, selectedJob]);
+
   // Restore scroll position when returning to the job list
   useEffect(() => {
     if (!selectedJob && activePage === 'home') {
@@ -1423,10 +1435,10 @@ export default function App() {
     }
   }, [selectedJob, activePage]);
 
-  // Scroll to top on page change
+  // Scroll to top on pagination change
   useEffect(() => {
-    if (scrollContainerRef.current && !selectedJob) {
-      scrollContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    if (scrollContainerRef.current && !selectedJob && activePage === 'home') {
+      scrollContainerRef.current.scrollTo({ top: 0, behavior: 'instant' });
     }
   }, [currentPage]);
 
@@ -1435,6 +1447,8 @@ export default function App() {
     setIsSidebarOpen(false);
     setSelectedJob(null);
     setActivePage('home');
+    scrollPositionRef.current = 0;
+    if (scrollContainerRef.current) scrollContainerRef.current.scrollTo({top: 0, behavior: 'smooth'});
   };
 
 
@@ -1656,6 +1670,7 @@ export default function App() {
                   <div className="flex items-center gap-3 cursor-pointer" onClick={() => { 
                     setActivePage('home'); 
                     setSelectedJob(null); 
+                    scrollPositionRef.current = 0;
                     setIsSidebarOpen(false); 
                     if (scrollContainerRef.current) scrollContainerRef.current.scrollTo({top: 0, behavior: 'smooth'}); 
                   }}>
@@ -1779,6 +1794,7 @@ export default function App() {
               <div className="md:hidden flex items-center cursor-pointer" onClick={() => { 
                 setActivePage('home'); 
                 setSelectedJob(null); 
+                scrollPositionRef.current = 0;
                 if (scrollContainerRef.current) scrollContainerRef.current.scrollTo({top: 0, behavior: 'smooth'}); 
               }}>
                 <div className="flex items-center gap-1.5 font-bold text-slate-700">
@@ -1796,6 +1812,7 @@ export default function App() {
               <div className="hidden md:flex items-center ml-2 cursor-pointer" onClick={() => { 
                 setActivePage('home'); 
                 setSelectedJob(null); 
+                scrollPositionRef.current = 0;
                 if (scrollContainerRef.current) scrollContainerRef.current.scrollTo({top: 0, behavior: 'smooth'}); 
               }}>
                 <div className="flex items-center gap-2 font-bold text-slate-700">
@@ -2034,11 +2051,6 @@ export default function App() {
                             scrollPositionRef.current = scrollContainerRef.current.scrollTop;
                           }
                           setSelectedJob(job);
-                          setTimeout(() => {
-                            if (scrollContainerRef.current) {
-                              scrollContainerRef.current.scrollTo(0, 0);
-                            }
-                          }, 10);
                         }}
                         className="bg-white text-left text-inherit block border border-[#e2e8f0] rounded-lg p-3 flex flex-col md:flex-row md:items-center justify-between group hover:border-[#3b82f6]/50 hover:shadow-md transition-all duration-200 gap-3 cursor-pointer content-vis-auto"
                       >
@@ -2215,7 +2227,7 @@ export default function App() {
                 Private job circular 2026 Bangladesh, Bangladesh government Job Circular 2026, Bangladesh Job Circular 2026, BD Job Circular 2026 apply online, NGO Job Circular 2026 Bangladesh, Bangladesh Job circular 2026 last date, Recent Job Circular 2026, Private Job Circular 2026 Bangladesh pdf, Govt job circular bangla cyber, BD Jobs apply online, Government jobs for HSC passed in Bangladesh, job circular 2026, bd job circular, govt job circular, job circular bd, job circular 2026 bangladesh, bangladesh job circular 2026, bd job circular 2026, job circular 2025, bank job circular, govt job circular 2026, somaj seba job circular, all job circular, police job circular 2026, somaj seba job circular 2026, asi job circular, teletalk, teletalk job, teletalk job circular, bank job circular 2026, asi job circular 2026, ngo job circular, all job circular 2026, government job circular, ngo job circular 2026, navy job circular 2026, new job circular, army job circular 2026, brac job circular, brac, bangladesh bank, bangladesh bank job circular, asi police job circular 2026, dss job circular, dss, modc job circular 2026, police asi job circular 2026, bd govt job circular, government job circular 2026, somaj seba odhidoptor job circular 2026, all govt job circular, bdjobs, new job circular 2026, dss job circular 2026, fire service job circular, gov job circular 2026, bangladesh police, brac job circular 2026, bangladesh police job circular 2026, fire service job circular 2026, bd jobs.
               </div>
               <div className="flex flex-col md:flex-row items-center justify-between gap-4 max-w-5xl mx-auto px-4 mt-2">
-                <div className="text-sm font-medium">© {toBengaliNumber(new Date().getFullYear())} <span className="cursor-pointer hover:text-blue-600 transition-colors" onClick={() => { setActivePage('home'); setSelectedJob(null); if (scrollContainerRef.current) scrollContainerRef.current.scrollTo({top: 0, behavior: 'smooth'}); }}>Jobs.talukdaracademy.com.bd</span>. All rights reserved.</div>
+                <div className="text-sm font-medium">© {toBengaliNumber(new Date().getFullYear())} <span className="cursor-pointer hover:text-blue-600 transition-colors" onClick={() => { setActivePage('home'); setSelectedJob(null); scrollPositionRef.current = 0; if (scrollContainerRef.current) scrollContainerRef.current.scrollTo({top: 0, behavior: 'smooth'}); }}>Jobs.talukdaracademy.com.bd</span>. All rights reserved.</div>
                 <div className="flex flex-wrap items-center justify-center gap-4 text-sm font-medium">
                   <button onClick={() => { setActivePage('privacy'); setSelectedJob(null); }} className="hover:text-blue-600 transition-colors hover:underline">Privacy Policy</button>
                   <button onClick={() => { setActivePage('terms'); setSelectedJob(null); }} className="hover:text-blue-600 transition-colors hover:underline">Terms of Service</button>
@@ -2559,7 +2571,7 @@ export default function App() {
 
       {/* Static Pages Modals */}
       <AnimatePresence>
-        {activePage !== 'home' && (
+        {(activePage === 'privacy' || activePage === 'terms' || activePage === 'contact') && (
           <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
             <motion.div
               initial={{ opacity: 0 }}
