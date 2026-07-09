@@ -654,7 +654,7 @@ export default function App() {
   const [filterPublishDate, setFilterPublishDate] = useState('যেকোনো প্রকাশের তারিখ');
   const [isFilterExpanded, setIsFilterExpanded] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [selectedJob, setSelectedJob] = useState<Job | null>(null);
+  const [selectedJob, setSelectedJob] = useState<Job | null>((window as any).__INITIAL_JOB__ || null);
   const [isJobDetailLoading, setIsJobDetailLoading] = useState(false);
   const [loadedImagesCount, setLoadedImagesCount] = useState(0);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
@@ -713,9 +713,17 @@ export default function App() {
         setActivePage('home');
       } else if (selectedJobRef.current && !jobId) {
         setSelectedJob(null);
-      } else if (jobId && jobsRef.current.length > 0) {
-        const job = jobsRef.current.find(j => j.id === jobId || j.slug === jobId || generateSlug(j.title, j.organization, j.id) === jobId);
-        if (job) setSelectedJob(job);
+      } else if (jobId) {
+        if (jobsRef.current.length > 0) {
+          const job = jobsRef.current.find(j => j.id === jobId || j.slug === jobId || generateSlug(j.title, j.organization, j.id) === jobId);
+          if (job) {
+            setSelectedJob(job);
+          } else {
+            axios.get(`/api/job/${jobId}`).then(response => {
+              if (response.data && response.data.id) setSelectedJob(response.data);
+            }).catch(e => console.warn(e));
+          }
+        }
       } else if (!showExitConfirmRef.current && !selectedJobRef.current) {
         // Only show exit confirm if we're at the root and moving back
         try {
@@ -968,6 +976,11 @@ export default function App() {
       const jobId = pathMatch ? pathMatch[1] : urlParams.get('job');
       
       if (jobId) {
+        // If we already have this job selected (e.g. from server-side INITIAL_JOB), skip
+        if (selectedJobRef.current && (selectedJobRef.current.id === jobId || selectedJobRef.current.slug === jobId || generateSlug(selectedJobRef.current.title, selectedJobRef.current.organization, selectedJobRef.current.id) === jobId)) {
+          return;
+        }
+        
         // If we have jobs loaded, check if it's there
         if (jobs.length > 0) {
           const job = jobs.find(j => j.id === jobId || j.slug === jobId || generateSlug(j.title, j.organization, j.id) === jobId);

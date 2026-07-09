@@ -429,6 +429,9 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
                 <script type="application/ld+json">
                   ${JSON.stringify(jsonLd)}
                 </script>
+                <script>
+                  window.__INITIAL_JOB__ = ${JSON.stringify(job).replace(/<\/script>/g, '<\\/script>')};
+                </script>
                 <noscript>
                   <article itemscope itemtype="http://schema.org/NewsArticle">
                     <h1 itemprop="headline">${cleanedTitle}</h1>
