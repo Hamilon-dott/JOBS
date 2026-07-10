@@ -812,7 +812,7 @@ export default function App() {
       
       const ogImage = document.querySelector('meta[property="og:image"]');
       if (ogImage) {
-        ogImage.setAttribute('content', selectedJob.imageUrls?.[0] || 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/84/Government_Seal_of_Bangladesh.svg/1200px-Government_Seal_of_Bangladesh.svg.png');
+        ogImage.setAttribute('content', selectedJob.imageUrls?.[0] || 'https://jobs.talukdaracademy.com.bd/govtlog.png');
       }
       
       const ogTitle = document.querySelector('meta[property="og:title"]');
@@ -887,7 +887,7 @@ export default function App() {
           }
         },
         "image": [
-          selectedJob.imageUrls?.[0] || 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/84/Government_Seal_of_Bangladesh.svg/1200px-Government_Seal_of_Bangladesh.svg.png'
+          selectedJob.imageUrls?.[0] || 'https://jobs.talukdaracademy.com.bd/govtlog.png'
         ],
         "mainEntityOfPage": {
           "@type": "WebPage",

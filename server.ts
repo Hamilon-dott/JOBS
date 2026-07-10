@@ -393,7 +393,7 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
                     "name": "BD Govt Job Circular",
                     "logo": {
                       "@type": "ImageObject",
-                      "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/84/Government_Seal_of_Bangladesh.svg/120px-Government_Seal_of_Bangladesh.svg.png"
+                      "url": host + "/govtlog.png"
                     }
                   },
                   "image": [ ogImageUrl ],
