@@ -327,7 +327,7 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
           pageDescription = `Get all recent results and recruitment notices matching "${cleanQuery}" in the Bangladesh Government and Bank Job Circular 2026. Find eligibility and apply now.`;
         }
         
-        let ogImageUrl = host + '/img.png';
+        let ogImageUrl = host + '/govtlog.png';
         
         // ডিফল্ট canonical ট্যাগটি মুছে দিচ্ছি, যেন ডাইনামিক ট্যাগ যুক্ত করতে পারি
         updatedHtml = updatedHtml.replace(/<link\s+rel="canonical"[^>]*>/gi, '');
@@ -369,7 +369,7 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
               const cleanedTitle = job.title.replace(/[<>&'"]/g, '');
               const cleanedOrg = (job.organization || '').replace(/[<>&'"]/g, '');
               pageTitle = `${cleanedTitle} - ${cleanedOrg}`;
-              ogImageUrl = job.imageUrls?.[0] || host + '/img.png';
+              ogImageUrl = job.imageUrls?.[0] || host + '/govtlog.png';
               
               // Extract a short description from content
               let noHtmlContent = job.content.replace(/<[^>]*>?/gm, '');

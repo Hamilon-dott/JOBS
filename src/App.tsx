@@ -235,7 +235,7 @@ const getDaysRemaining = (deadlineStr: string) => {
   }
 };
 
-const BD_GOVT_LOGO = "/img.png";
+const BD_GOVT_LOGO = "/govtlog.png";
 
 const useAdBlockDetector = () => {
   const [isAdBlockEnabled, setIsAdBlockEnabled] = useState(false);
@@ -918,7 +918,7 @@ export default function App() {
       
       const ogImage = document.querySelector('meta[property="og:image"]');
       if (ogImage) {
-        ogImage.setAttribute('content', 'https://jobs.talukdaracademy.com.bd/img.png');
+        ogImage.setAttribute('content', 'https://jobs.talukdaracademy.com.bd/govtlog.png');
       }
 
       const url = new URL(window.location.href);
