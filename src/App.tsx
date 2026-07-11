@@ -2070,9 +2070,9 @@ export default function App() {
                         <div className="flex items-center gap-3 md:gap-4 mb-4 md:mb-6">
                           <div className={cn(
                             "w-10 h-10 md:w-12 md:h-12 rounded-lg md:rounded-xl flex items-center justify-center font-bold text-xs md:text-sm shrink-0 border transition-all overflow-hidden bg-white px-1",
-                            job.source.includes('Government') ? "border-emerald-200" : "bg-[#f1f5f9] text-[#64748b] border-[#e2e8f0] group-hover:bg-[#3b82f6]/5 group-hover:text-[#3b82f6]"
+                            (job.source.toLowerCase().includes('government') || job.source.toLowerCase().includes('govt')) ? "border-emerald-200" : "bg-[#f1f5f9] text-[#64748b] border-[#e2e8f0] group-hover:bg-[#3b82f6]/5 group-hover:text-[#3b82f6]"
                           )}>
-                            {job.source.includes('Government') ? (
+                            {(job.source.toLowerCase().includes('government') || job.source.toLowerCase().includes('govt')) ? (
                               <img src={BD_GOVT_LOGO} alt="Govt Logo" width={48} height={48} className="w-full h-full object-contain" referrerPolicy="no-referrer" loading="lazy" />
                             ) : (
                               getInitials(job.organization)
@@ -2404,7 +2404,7 @@ export default function App() {
                           <h1 className="text-2xl md:text-3xl font-bold text-[#0f172a] mb-4 leading-tight">{selectedJob.title}</h1>
                           <div className="flex flex-col sm:flex-row sm:items-center gap-4 mb-2">
                             <div className="flex items-center gap-3 bg-slate-50 border border-slate-100 px-4 py-3 rounded-xl inline-flex w-full sm:w-auto">
-                              {selectedJob.source.includes('Government') && (
+                              {(selectedJob.source.toLowerCase().includes('government') || selectedJob.source.toLowerCase().includes('govt')) && (
                                 <img src={BD_GOVT_LOGO} alt="Govt Logo" width={32} height={32} className="w-8 h-8 object-contain shrink-0" referrerPolicy="no-referrer" loading="lazy" />
                               )}
                               <p className="text-lg text-[#3b82f6] font-semibold">{selectedJob.organization}</p>
