@@ -1577,22 +1577,25 @@ export default function App() {
         {activePage !== 'admin' && !isClosing && !selectedJob && (
           <div className="bg-indigo-900 text-indigo-50 py-2.5 overflow-hidden flex items-center border-b border-indigo-950 shrink-0 shadow-inner z-[200] relative">
             <div className="min-w-max shrink-0 whitespace-nowrap animate-marquee font-medium text-sm md:text-base tracking-wide flex gap-4 items-center">
-              <span>যেকোনো শ্রেণীর গাইডবই ডাউনলোড করুন: <a href="https://guide.talukdaracademy.com.bd" className="text-yellow-300 hover:underline font-bold" target="_blank" rel="noopener noreferrer">guide.talukdaracademy.com.bd</a></span>
+                <span>যেকোনো শ্রেণীর গাইডবই ডাউনলোড করুন: <a href="https://guide.talukdaracademy.com.bd" className="text-yellow-300 hover:underline font-bold">guide.talukdaracademy.com.bd</a></span>
+            <span className="text-indigo-400">||</span>
+            <span>চাকরির পরীক্ষার সীট প্ল্যান: <a href="https://ecf.talukdaracademy.com.bd" className="text-yellow-300 hover:underline font-bold">ecf.talukdaracademy.com.bd</a></span>
+            <span className="text-indigo-400">||</span>
+            <span>ঢাকা সিটি বাস ভাড়া: <a href="https://busvara.talukdaracademy.com.bd" className="text-yellow-300 hover:underline font-bold">busvara.talukdaracademy.com.bd</a></span>
+            <span className="text-indigo-400">||</span>
+              <span>পাবলিক পরীক্ষার ফলাফল দেখতে: <a href="https://result.talukdaracademy.com.bd" className="text-yellow-300 hover:underline font-bold">result.talukdaracademy.com.bd</a></span>
               <span className="text-indigo-400">||</span>
-              
-              <span>ঢাকা সিটি বাস ভাড়া: <a href="https://busvara.talukdaracademy.com.bd" className="text-yellow-300 hover:underline font-bold" target="_blank" rel="noopener noreferrer">busvara.talukdaracademy.com.bd</a></span>
+               <span>যেকোনো শ্রেণীর পাঠ্যবই ডাউনলোড করুন: <a href="https://nctb.talukdaracademy.com.bd" className="text-yellow-300 hover:underline font-bold">nctb.talukdaracademy.com.bd</a></span>
+              <span className="text-indigo-400">||</span>
+            <span>বাংলাদেশ প্রাইজবন্ড রেজাল্ট চেক: <a href="https://bond.talukdaracademy.com.bd" className="text-yellow-300 hover:underline font-bold">bond.talukdaracademy.com.bd</a></span>
+            <span className="text-indigo-400">||</span>
+             <span>আজকের স্বর্ণের দাম: <a href="https://gold.talukdaracademy.com.bd" className="text-yellow-300 hover:underline font-bold">gold.talukdaracademy.com.bd</a></span>
               <span className="text-indigo-400">||</span>
 
-              <span>যেকোনো শ্রেণীর পাঠ্যবই ডাউনলোড করুন: <a href="https://nctb.talukdaracademy.com.bd" className="text-yellow-300 hover:underline font-bold">nctb.talukdaracademy.com.bd</a></span>
+              <span>এলপিজি গ্যাসের দাম: <a href="https://lpg.talukdaracademy.com.bd" className="text-yellow-300 hover:underline font-bold">lpg.talukdaracademy.com.bd</a></span>
               <span className="text-indigo-400">||</span>
-              
-              <span>বাংলাদেশ প্রাইজবন্ড রেজাল্ট চেক: <a href="https://bond.talukdaracademy.com.bd" className="text-yellow-300 hover:underline font-bold" target="_blank" rel="noopener noreferrer">bond.talukdaracademy.com.bd</a></span>
-              <span className="text-indigo-400">||</span>
-              
-              <span>চাকরির পরীক্ষার সীট প্ল্যান: <a href="https://ecf.talukdaracademy.com.bd" className="text-yellow-300 hover:underline font-bold" target="_blank" rel="noopener noreferrer">ecf.talukdaracademy.com.bd</a></span>
-              <span className="text-indigo-400">||</span>
-              
-              <span>এনবিআর টিন (TIN) অডিট চেকার: <a href="https://nbr.talukdaracademy.com.bd" className="text-yellow-300 hover:underline font-bold" target="_blank" rel="noopener noreferrer">nbr.talukdaracademy.com.bd</a></span>
+            
+            <span>এনবিআর TIN অডিট চেকার: <a href="https://nbr.talukdaracademy.com.bd" className="text-yellow-300 hover:underline font-bold">nbr.talukdaracademy.com.bd</a></span>
             </div>
           </div>
         )}
