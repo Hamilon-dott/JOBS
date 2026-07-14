@@ -98,12 +98,49 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
     }
   });
 
+  let cachedSitemapXml = '';
+  let lastSitemapFetch = 0;
+
   // Sitemap.xml
   app.get('/sitemap.xml', async (req, res) => {
     try {
-      const jobs = await fetchLatestJobs(true);
       const host = req.get('host')?.includes('localhost') ? `${req.protocol}://${req.get('host')}` : 'https://jobs.talukdaracademy.com.bd';
+      const now = Date.now();
       
+      if (cachedSitemapXml && now - lastSitemapFetch < 12 * 60 * 60 * 1000) {
+        res.type('application/xml');
+        res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+        return res.send(cachedSitemapXml);
+      }
+
+      let allPosts: any[] = [];
+      try {
+        const firstPage = await axios.get('https://bdgovtjob.net/wp-json/wp/v2/posts?_fields=id,slug,date,modified,title&per_page=100&page=1', { timeout: 15000, httpsAgent });
+        if (firstPage.data && Array.isArray(firstPage.data)) {
+          allPosts.push(...firstPage.data);
+          const totalPages = parseInt(firstPage.headers['x-wp-totalpages'] || '1');
+          
+          const MAX_CONCURRENT = 5;
+          for (let i = 2; i <= totalPages; i += MAX_CONCURRENT) {
+             const promises = [];
+             for (let j = i; j < i + MAX_CONCURRENT && j <= totalPages; j++) {
+                promises.push(axios.get(`https://bdgovtjob.net/wp-json/wp/v2/posts?_fields=id,slug,date,modified,title&per_page=100&page=${j}`, { timeout: 15000, httpsAgent }).then(r => r.data).catch(() => []));
+             }
+             const results = await Promise.all(promises);
+             results.forEach(res => {
+               if (Array.isArray(res)) allPosts.push(...res);
+             });
+          }
+        }
+      } catch (e) {
+        console.error('Failed to fetch full posts for sitemap', e);
+      }
+
+      if (allPosts.length === 0) {
+        const jobs = await fetchLatestJobs(true);
+        allPosts = jobs.map(j => ({ slug: j.slug, modified: j.publishedDate, date: j.publishedDate, id: j.id, title: { rendered: j.title } }));
+      }
+
       const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
@@ -111,18 +148,28 @@ Sitemap: ${baseUrl}/news-sitemap.xml`);
     <changefreq>always</changefreq>
     <priority>1.0</priority>
   </url>
-  ${jobs.map(job => `
+  ${allPosts.map(post => {
+    let jobSlug = post.slug;
+    if (!jobSlug || /^\\d+$/.test(jobSlug)) {
+      jobSlug = generateSlug(post.title?.rendered || 'Job', '', String(post.id), post.slug);
+    }
+    const lastMod = (post.modified || post.date || new Date().toISOString()).split('T')[0];
+    return `
   <url>
-    <loc>${host}/jobs/${job.slug || generateSlug(job.title, job.organization, job.id)}</loc>
-    <lastmod>${new Date(job.publishedDate).toISOString().split('T')[0]}</lastmod>
+    <loc>${host}/jobs/${jobSlug}</loc>
+    <lastmod>${lastMod}</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.9</priority>
-  </url>`).join('')}
+  </url>`;
+  }).join('')}
 </urlset>`;
+
+      cachedSitemapXml = sitemap.replace(/&(?!(?:apos|quot|[lg]t|amp);|#)/g, '&amp;');
+      lastSitemapFetch = now;
 
       res.type('application/xml');
       res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
-      res.send(sitemap);
+      res.send(cachedSitemapXml);
     } catch (error) {
       console.error('Error generating sitemap:', error);
       res.status(500).send('Error generating sitemap');
