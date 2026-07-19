@@ -4,48 +4,65 @@ export async function onRequest(context: any) {
   const { request } = context;
   const url = new URL(request.url);
   
-  // Set host dynamically or use production domain
   const host = 'https://jobs.talukdaracademy.com.bd';
+  const isNewsSitemap = url.pathname.includes('news-sitemap.xml') || url.searchParams.get('type') === 'news';
   
   try {
     const jobs = await fetchLatestJobs(true);
     
     let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
-    xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">\n`;
     
-    // Add main URL
-    xml += `  <url>\n`;
-    xml += `    <loc>${host}/</loc>\n`;
-    xml += `    <changefreq>daily</changefreq>\n`;
-    xml += `    <priority>1.0</priority>\n`;
-    xml += `  </url>\n`;
-    
-    // Add job URLs
-    jobs.forEach((job: any) => {
-      const slug = job.slug || generateSlug(job.title, job.organization, job.id);
-      const loc = `${host}/jobs/${slug}`;
-      const pubDate = job.publishedDate ? job.publishedDate.split('T')[0] : new Date().toISOString().split('T')[0];
-      const cleanTitle = (job.title || '').replace(/[<>&'"]/g, '');
-      const cleanOrg = (job.organization || '').replace(/[<>&'"]/g, '');
+    if (isNewsSitemap) {
+      xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">\n`;
       
+      // Google News sitemaps only show items published in the last 2 days. 
+      // We will select the 30 most recent items to guarantee fresh content.
+      const newsJobs = [...jobs]
+        .sort((a, b) => new Date(b.publishedDate).getTime() - new Date(a.publishedDate).getTime())
+        .slice(0, 30);
+        
+      newsJobs.forEach((job: any) => {
+        const slug = job.slug || generateSlug(job.title, job.organization, job.id);
+        const loc = `${host}/jobs/${slug}`;
+        const cleanTitle = (job.title || '').replace(/[<>&'"]/g, '');
+        const pubISO = job.publishedDate ? new Date(job.publishedDate).toISOString() : new Date().toISOString();
+        
+        xml += `  <url>\n`;
+        xml += `    <loc>${loc}</loc>\n`;
+        xml += `    <news:news>\n`;
+        xml += `      <news:publication>\n`;
+        xml += `        <news:name>BD Govt Job Circular</news:name>\n`;
+        xml += `        <news:language>bn</news:language>\n`;
+        xml += `      </news:publication>\n`;
+        xml += `      <news:publication_date>${pubISO}</news:publication_date>\n`;
+        xml += `      <news:title>${cleanTitle}</news:title>\n`;
+        xml += `    </news:news>\n`;
+        xml += `  </url>\n`;
+      });
+    } else {
+      xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n`;
+      
+      // Add home page URL
       xml += `  <url>\n`;
-      xml += `    <loc>${loc}</loc>\n`;
-      xml += `    <lastmod>${pubDate}</lastmod>\n`;
-      xml += `    <changefreq>weekly</changefreq>\n`;
-      xml += `    <priority>0.8</priority>\n`;
-      
-      // Google News tags
-      xml += `    <news:news>\n`;
-      xml += `      <news:publication>\n`;
-      xml += `        <news:name>BD Govt Job Circular</news:name>\n`;
-      xml += `        <news:language>bn</news:language>\n`;
-      xml += `      </news:publication>\n`;
-      xml += `      <news:publication_date>${job.publishedDate}</news:publication_date>\n`;
-      xml += `      <news:title>${cleanTitle}</news:title>\n`;
-      xml += `    </news:news>\n`;
-      
+      xml += `    <loc>${host}/</loc>\n`;
+      xml += `    <changefreq>daily</changefreq>\n`;
+      xml += `    <priority>1.0</priority>\n`;
       xml += `  </url>\n`;
-    });
+      
+      // Add all jobs
+      jobs.forEach((job: any) => {
+        const slug = job.slug || generateSlug(job.title, job.organization, job.id);
+        const loc = `${host}/jobs/${slug}`;
+        const pubDate = job.publishedDate ? job.publishedDate.split('T')[0] : new Date().toISOString().split('T')[0];
+        
+        xml += `  <url>\n`;
+        xml += `    <loc>${loc}</loc>\n`;
+        xml += `    <lastmod>${pubDate}</lastmod>\n`;
+        xml += `    <changefreq>weekly</changefreq>\n`;
+        xml += `    <priority>0.8</priority>\n`;
+        xml += `  </url>\n`;
+      });
+    }
     
     xml += `</urlset>\n`;
     
@@ -53,7 +70,7 @@ export async function onRequest(context: any) {
       status: 200,
       headers: {
         'Content-Type': 'application/xml; charset=utf-8',
-        'Cache-Control': 'public, max-age=14400' // 4 hours cache
+        'Cache-Control': 'public, max-age=7200' // 2 hours cache
       }
     });
   } catch (error: any) {

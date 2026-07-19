@@ -1404,7 +1404,7 @@ export default function App() {
       console.warn('Server API failed or returned empty. Attempting direct client-side WordPress fetch fallback:', error);
       try {
         setUpdateStatus('checking');
-        const pages = [1, 2, 3, 4, 5];
+        const pages = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
         const pagePromises = pages.map(async (page) => {
           try {
             const res = await axios.get(`https://bdgovtjob.net/wp-json/wp/v2/posts?_embed&per_page=100&page=${page}`, {

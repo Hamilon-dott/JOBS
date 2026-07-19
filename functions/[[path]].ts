@@ -88,6 +88,9 @@ export async function onRequest(context: any) {
         noHtmlContent = noHtmlContent.replace(/\s+/g, ' ').trim();
         pageDescription = noHtmlContent.length > 150 ? noHtmlContent.substring(0, 150) + '...' : noHtmlContent;
         
+        // Google Jobs requires complete job descriptions. We use up to 4000 characters.
+        const fullJobDescriptionForSchema = noHtmlContent.length > 4000 ? noHtmlContent.substring(0, 4000) + '...' : noHtmlContent;
+        
         const jsonLd = [
           {
             "@context": "https://schema.org/",
@@ -118,18 +121,36 @@ export async function onRequest(context: any) {
             "@context": "https://schema.org/",
             "@type": "JobPosting",
             "title": cleanedTitle,
-            "description": pageDescription,
+            "description": fullJobDescriptionForSchema,
             "datePosted": job.publishedDate,
-            "validThrough": job.deadlineISO || new Date(new Date(job.publishedDate).getTime() + 30*24*60*60*1000).toISOString(),
+            "validThrough": job.deadlineISO || new Date(new Date(job.publishedDate).getTime() + 45*24*60*60*1000).toISOString(),
             "hiringOrganization": {
               "@type": "Organization",
-              "name": cleanedOrg || "BD Govt Job Circular"
+              "name": cleanedOrg || "BD Govt Job Circular",
+              "sameAs": host
+            },
+            "identifier": {
+              "@type": "PropertyValue",
+              "name": "BD Govt Job Circular",
+              "value": `BD-GOVT-JOB-${job.id}`
             },
             "jobLocation": {
               "@type": "Place",
               "address": {
                 "@type": "PostalAddress",
+                "streetAddress": "Dhaka",
+                "addressLocality": "Dhaka",
+                "addressRegion": "Dhaka Division",
                 "addressCountry": "BD"
+              }
+            },
+            "baseSalary": {
+              "@type": "MonetaryAmount",
+              "currency": "BDT",
+              "value": {
+                "@type": "QuantitativeValue",
+                "value": "Negotiable / Government Grade Scale",
+                "unitText": "MONTH"
               }
             },
             "employmentType": "FULL_TIME",

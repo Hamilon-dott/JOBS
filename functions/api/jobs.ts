@@ -29,7 +29,7 @@ export async function fetchLatestJobs(isFull: boolean) {
 
   const jobs: any[] = [];
   try {
-    const pages = [1, 2, 3, 4, 5];
+    const pages = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
     const pagePromises = pages.map(async (page) => {
       const endpoint = `https://bdgovtjob.net/wp-json/wp/v2/posts?_embed&per_page=100&page=${page}`;
       const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
