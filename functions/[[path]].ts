@@ -7,7 +7,7 @@ export async function onRequest(context: any) {
   // Avoid intercepting API routes or static files
   if (
     url.pathname.startsWith('/api/') ||
-    url.pathname.match(/\.(png|jpg|jpeg|gif|css|js|ico|xml|txt|json)$/i)
+    url.pathname.match(/\.(png|jpg|jpeg|gif|css|js|ts|tsx|ico|xml|txt|json)$/i)
   ) {
     return next();
   }
