@@ -1,4 +1,4 @@
-import * as cheerio from 'cheerio';
+import { load } from 'cheerio';
 
 let cachedJobsFull: any[] | null = null;
 let lastFetchFull = 0;
@@ -30,7 +30,20 @@ export async function fetchLatestJobs(isFull: boolean) {
   const jobs: any[] = [];
   try {
     const endpoint = 'https://bdgovtjob.net/wp-json/wp/v2/posts?_embed&per_page=100';
-    const response = await fetch(endpoint, { signal: AbortSignal.timeout(15000) });
+    
+    // Cloudflare compatible safe timeout fetch with realistic browser headers
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeoutId = controller ? setTimeout(() => controller.abort(), 15000) : null;
+    const response = await fetch(endpoint, { 
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json',
+        'Accept-Language': 'en-US,en;q=0.9,bn;q=0.8'
+      },
+      signal: controller ? controller.signal : undefined 
+    });
+    if (timeoutId) clearTimeout(timeoutId);
+    
     const posts = await response.json();
 
     if (Array.isArray(posts)) {
@@ -38,7 +51,7 @@ export async function fetchLatestJobs(isFull: boolean) {
         const title = post.title?.rendered || "Job Circular";
         const titleText = title.replace(/&#8211;/g, '-').replace(/&#8217;/g, "'").replace(/<\/?[^>]+(>|$)/g, "").trim();
         const rawContent = post.content?.rendered || "";
-        const $ = cheerio.load(rawContent);
+        const $ = load(rawContent);
 
         const extractFromTableOrText = (labels: string[]) => {
           let result = null;
@@ -116,7 +129,20 @@ export async function fetchSingleJob(slugOrId: string) {
       : `https://bdgovtjob.net/wp-json/wp/v2/posts?slug=${encodeURIComponent(slugOrId)}&_embed`;
     
     console.log("Fetching single job from API:", endpoint);
-    const response = await fetch(endpoint, { signal: AbortSignal.timeout(15000) });
+    
+    // Cloudflare compatible safe timeout fetch with realistic browser headers
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeoutId = controller ? setTimeout(() => controller.abort(), 15000) : null;
+    const response = await fetch(endpoint, { 
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json',
+        'Accept-Language': 'en-US,en;q=0.9,bn;q=0.8'
+      },
+      signal: controller ? controller.signal : undefined 
+    });
+    if (timeoutId) clearTimeout(timeoutId);
+    
     const data = await response.json();
     const post = isId ? data : (Array.isArray(data) ? data[0] : null);
     
@@ -125,7 +151,7 @@ export async function fetchSingleJob(slugOrId: string) {
     const title = post.title?.rendered || "Job Circular";
     const titleText = title.replace(/&#8211;/g, '-').replace(/&#8217;/g, "'").replace(/<\/?[^>]+(>|$)/g, "").trim();
     const rawContent = post.content?.rendered || "";
-    const $ = cheerio.load(rawContent);
+    const $ = load(rawContent);
     
     const extractFromTableOrText = (labels: string[]) => {
       let result = null;
