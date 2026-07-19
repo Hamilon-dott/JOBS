@@ -434,7 +434,7 @@ const HistatsCounter = () => {
       <div id="histats_counter"></div>
       <noscript>
         <a href="/" target="_blank" rel="noopener noreferrer">
-          <img src="//sstatic1.histats.com/0.gif?5032075&101" alt="counter easy hit" border="0" />
+          <img src="//sstatic1.histats.com/0.gif?5032075&101" alt="counter easy hit" style={{ border: 0 }} />
         </a>
       </noscript>
     </div>

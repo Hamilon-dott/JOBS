@@ -4,9 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"vite . --port 3001 --host 0.0.0.0\" \"wrangler pages dev --port 3000 --ip 0.0.0.0 --proxy 3001\"",
-    "start": "wrangler pages dev dist --port 3000",
-    "build": "vite build",
+    "dev": "tsx server.ts",
+    "start": "node dist/server.cjs",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit"
@@ -21,7 +21,7 @@
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "dotenv": "^17.2.3",
-    "express": "^4.21.2",
+    "express": "^4.22.2",
     "framer-motion": "^12.38.0",
     "idb-keyval": "^6.2.4",
     "lucide-react": "^0.546.0",
