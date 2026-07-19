@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
+import { GoogleGenAI } from '@google/genai';
 import { fetchSingleJob, fetchLatestJobs, generateSlug } from './functions/api/jobs.js';
 
 async function startServer() {
@@ -17,7 +18,7 @@ async function startServer() {
       if (id) {
         const job = await fetchSingleJob(id);
         if (job) {
-          res.setHeader('Content-Type', 'application/json');
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
           res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
           res.setHeader('Pragma', 'no-cache');
           res.setHeader('Expires', '0');
@@ -31,7 +32,7 @@ async function startServer() {
       const isFull = full === 'true';
       const jobs = await fetchLatestJobs(isFull);
       
-      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
       res.setHeader('Pragma', 'no-cache');
       res.setHeader('Expires', '0');
@@ -40,6 +41,136 @@ async function startServer() {
       console.error('API Error:', error);
       res.status(500).json({ error: 'Failed to fetch jobs' });
     }
+  });
+
+  app.get('/api/job/:slugOrId', async (req, res) => {
+    try {
+      const { slugOrId } = req.params;
+      const job = await fetchSingleJob(slugOrId);
+      if (job) {
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.status(200).json(job);
+      } else {
+        res.status(404).json({ error: 'Job not found' });
+      }
+    } catch (error: any) {
+      console.error('API Error:', error);
+      res.status(500).json({ error: 'Failed to fetch job details' });
+    }
+  });
+
+  app.get('/api/sync-firebase', async (req, res) => {
+    try {
+      const jobs = await fetchLatestJobs(true);
+      res.status(200).json({ success: true, count: jobs.length });
+    } catch (error: any) {
+      console.error('Sync Error:', error);
+      res.status(500).json({ success: false, error: 'Failed to sync cache', details: error.message });
+    }
+  });
+
+  app.post('/api/generate-summary', express.json(), async (req, res) => {
+    try {
+      const { title, organization, content } = req.body;
+      if (!content) {
+        return res.status(400).json({ error: 'Content is required' });
+      }
+
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return res.status(500).json({ error: 'GEMINI_API_KEY is not configured locally' });
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey: apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
+
+      const systemInstruction = `You are an expert job assistant in Bangladesh.
+Summarize the key details of this job circular in Bengali in a bulleted list.
+Include fields like:
+- প্রতিষ্ঠানের নাম (Organization Name)
+- পদের নাম (Job Title/Position)
+- খালি পদের সংখ্যা (Number of Vacancies)
+- শিক্ষাগত যোগ্যতা (Educational Qualification)
+- বেতন ও অন্যান্য সুযোগ-সুবিধা (Salary & Benefits)
+- আবেদনের শেষ তারিখ (Application Deadline)
+Format the output beautifully with standard Bengali markdown bullet points. Do not include introductory or concluding conversational text.`;
+
+      const prompt = `Title: ${title}
+Organization: ${organization}
+Content: ${content}`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: prompt,
+        config: {
+          systemInstruction: systemInstruction,
+          temperature: 0.2,
+        },
+      });
+
+      const summaryText = response.text || "সারসংক্ষেপ তৈরি করা সম্ভব হয়নি।";
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.status(200).json({ summary: summaryText });
+    } catch (error: any) {
+      console.error('Failed to generate summary:', error);
+      res.status(500).json({ error: 'Failed to generate summary', details: error.message });
+    }
+  });
+
+  app.get('/api/sitemap', async (req, res) => {
+    try {
+      const host = 'https://jobs.talukdaracademy.com.bd';
+      const jobs = await fetchLatestJobs(true);
+      
+      let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+      xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">\n`;
+      
+      xml += `  <url>\n`;
+      xml += `    <loc>${host}/</loc>\n`;
+      xml += `    <changefreq>daily</changefreq>\n`;
+      xml += `    <priority>1.0</priority>\n`;
+      xml += `  </url>\n`;
+      
+      jobs.forEach((job: any) => {
+        const slug = job.slug || generateSlug(job.title, job.organization, job.id);
+        const loc = `${host}/jobs/${slug}`;
+        const pubDate = job.publishedDate ? job.publishedDate.split('T')[0] : new Date().toISOString().split('T')[0];
+        const cleanTitle = (job.title || '').replace(/[<>&'"]/g, '');
+        
+        xml += `  <url>\n`;
+        xml += `    <loc>${loc}</loc>\n`;
+        xml += `    <lastmod>${pubDate}</lastmod>\n`;
+        xml += `    <changefreq>weekly</changefreq>\n`;
+        xml += `    <priority>0.8</priority>\n`;
+        xml += `    <news:news>\n`;
+        xml += `      <news:publication>\n`;
+        xml += `        <news:name>BD Govt Job Circular</news:name>\n`;
+        xml += `        <news:language>bn</news:language>\n`;
+        xml += `      </news:publication>\n`;
+        xml += `      <news:publication_date>${job.publishedDate}</news:publication_date>\n`;
+        xml += `      <news:title>${cleanTitle}</news:title>\n`;
+        xml += `    </news:news>\n`;
+        xml += `  </url>\n`;
+      });
+      
+      xml += `</urlset>\n`;
+      
+      res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+      res.status(200).send(xml);
+    } catch (error) {
+      console.error('Failed to generate sitemap:', error);
+      res.status(500).send('Failed to generate sitemap');
+    }
+  });
+
+  app.get(['/sitemap.xml', '/news-sitemap.xml'], (req, res) => {
+    res.redirect('/api/sitemap');
   });
 
   let vite: any;

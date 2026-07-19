@@ -177,3 +177,51 @@ export async function fetchSingleJob(slugOrId: string) {
     return null;
   }
 }
+
+export async function onRequest(context: any) {
+  const { request } = context;
+  const url = new URL(request.url);
+  try {
+    const id = url.searchParams.get('id');
+    const full = url.searchParams.get('full');
+    
+    if (id) {
+      const job = await fetchSingleJob(id);
+      if (job) {
+        return new Response(JSON.stringify(job), {
+          status: 200,
+          headers: { 
+            'Content-Type': 'application/json; charset=utf-8',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+          }
+        });
+      } else {
+        return new Response(JSON.stringify({ error: 'Job not found' }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+    }
+    
+    const isFull = full === 'true';
+    const jobs = await fetchLatestJobs(isFull);
+    
+    return new Response(JSON.stringify(jobs), {
+      status: 200,
+      headers: { 
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      }
+    });
+  } catch (error: any) {
+    console.error('API Error:', error);
+    return new Response(JSON.stringify({ error: 'Failed to fetch jobs', details: error.message }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+}
