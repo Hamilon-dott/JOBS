@@ -44,6 +44,11 @@ export async function fetchLatestJobs(isFull: boolean) {
     });
     if (timeoutId) clearTimeout(timeoutId);
     
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      throw new Error(`WordPress API returned status ${response.status} ${response.statusText}. Snippet: ${errText.substring(0, 300)}`);
+    }
+    
     const posts = await response.json();
 
     if (Array.isArray(posts)) {
@@ -143,6 +148,11 @@ export async function fetchSingleJob(slugOrId: string) {
     });
     if (timeoutId) clearTimeout(timeoutId);
     
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      throw new Error(`WordPress API returned status ${response.status} ${response.statusText}. Snippet: ${errText.substring(0, 300)}`);
+    }
+    
     const data = await response.json();
     const post = isId ? data : (Array.isArray(data) ? data[0] : null);
     
@@ -210,6 +220,52 @@ export async function onRequest(context: any) {
   try {
     const id = url.searchParams.get('id');
     const full = url.searchParams.get('full');
+    const diag = url.searchParams.get('diag');
+    
+    if (diag === 'true') {
+      const endpoint = 'https://bdgovtjob.net/wp-json/wp/v2/posts?_embed&per_page=10';
+      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const timeoutId = controller ? setTimeout(() => controller.abort(), 10000) : null;
+      
+      const fetchStart = Date.now();
+      let fetchError = null;
+      let status = 0;
+      let headers: any = {};
+      let firstChars = '';
+      
+      try {
+        const res = await fetch(endpoint, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json',
+            'Accept-Language': 'en-US,en;q=0.9'
+          },
+          signal: controller ? controller.signal : undefined
+        });
+        status = res.status;
+        res.headers.forEach((val, key) => {
+          headers[key] = val;
+        });
+        const text = await res.text();
+        firstChars = text.substring(0, 1000);
+      } catch (err: any) {
+        fetchError = { message: err.message, stack: err.stack };
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+      }
+      
+      return new Response(JSON.stringify({
+        success: !fetchError,
+        durationMs: Date.now() - fetchStart,
+        status,
+        headers,
+        firstChars,
+        error: fetchError
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json; charset=utf-8' }
+      });
+    }
     
     if (id) {
       const job = await fetchSingleJob(id);

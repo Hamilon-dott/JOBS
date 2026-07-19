@@ -719,9 +719,9 @@ export default function App() {
           if (job) {
             setSelectedJob(job);
           } else {
-            axios.get(`/api/job/${jobId}`).then(response => {
-              if (response.data && response.data.id) setSelectedJob(response.data);
-            }).catch(e => console.warn(e));
+            fetchSingleJobClientSide(jobId).then(job => {
+              if (job) setSelectedJob(job);
+            });
           }
         }
       } else if (!showExitConfirmRef.current && !selectedJobRef.current) {
@@ -988,14 +988,9 @@ export default function App() {
              if (activePage === 'home') setSelectedJob(job);
           } else {
              // Not in current list, try fetching directly from API
-             try {
-               const response = await axios.get(`/api/job/${jobId}`);
-               if (response.data && response.data.id && activePage === 'home') {
-                 setSelectedJob(response.data);
-               }
-             } catch (e) {
-               console.warn("Direct job fetch failed", e);
-             }
+             fetchSingleJobClientSide(jobId).then(job => {
+               if (job && activePage === 'home') setSelectedJob(job);
+             });
           }
         }
       }
@@ -1044,15 +1039,10 @@ export default function App() {
       if (!selectedJob.content && !selectedJob.imageUrls) {
         const fetchFullJob = async () => {
           setIsJobDetailLoading(true);
-          try {
-            const response = await axios.get(`/api/job/${selectedJob.slug || selectedJob.id}`);
-            if (response.data && response.data.id) {
-              setSelectedJob(prev => prev && (prev.id === selectedJob.id || prev.slug === selectedJob.slug) ? response.data : prev);
-            } else {
-              setIsJobDetailLoading(false);
-            }
-          } catch (e) {
-            console.warn("Failed to fetch full job details", e);
+          const job = await fetchSingleJobClientSide(selectedJob.slug || selectedJob.id);
+          if (job) {
+            setSelectedJob(prev => prev && (prev.id === selectedJob.id || prev.slug === selectedJob.slug) ? job : prev);
+          } else {
             setIsJobDetailLoading(false);
           }
         };
@@ -1196,6 +1186,95 @@ export default function App() {
     ];
   };
 
+  const parsePostClientSide = (post: any): Job => {
+    const title = post.title?.rendered || "Job Circular";
+    const titleText = title.replace(/&#8211;/g, '-').replace(/&#8217;/g, "'").replace(/<\/?[^>]+(>|$)/g, "").trim();
+    const rawContent = post.content?.rendered || "";
+    
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(rawContent, 'text/html');
+    
+    const extractFromTableOrText = (labels: string[]) => {
+      let result: string | null = null;
+      const trs = doc.querySelectorAll('tr');
+      trs.forEach(row => {
+        const rowText = row.textContent?.toLowerCase() || '';
+        if (labels.some(label => rowText.includes(label.toLowerCase()))) {
+          const tds = row.querySelectorAll('td');
+          const value = tds[tds.length - 1]?.textContent?.trim();
+          if (value && value.length > 2 && value.length < 150) {
+            result = value;
+          }
+        }
+      });
+      return result;
+    };
+
+    const deadline = extractFromTableOrText(['আবেদনের শেষ তারিখ', 'আবেদনের শেষ সময়', 'আবেদন শেষ', 'Last Date', 'Deadline']) || "সার্কুলার দেখুন";
+    
+    let orgName = extractFromTableOrText(['প্রতিষ্ঠানের নাম', 'প্রতিষ্ঠান', 'Organisation', 'Organization', 'Company Name']);
+    if (!orgName) {
+      orgName = title.split(/Job|Circular|নিয়োগ|বিজ্ঞপ্তি/i)[0].trim() || "Job Circular";
+    }
+
+    const imgMatches = rawContent.matchAll(/src=["']([^"'>]+\.(?:jpg|jpeg|png|webp|gif)[^"'>]*)["']/gi);
+    const imageUrls = Array.from(imgMatches, m => m[1]);
+
+    const embeddedTerms = post._embedded?.['wp:term']?.flat() || [];
+    const termNames = embeddedTerms.map((t: any) => t?.name?.toLowerCase() || '');
+    const categories: string[] = [];
+    if (termNames.some((n: any) => n.includes('govt') || n.includes('সরকারি'))) categories.push('Government');
+    if (termNames.some((n: any) => n.includes('bank') || n.includes('ব্যাংক'))) categories.push('Bank');
+    if (categories.length === 0) categories.push('General');
+
+    const slugVal = generateSlug(titleText, orgName, String(post.id), post.slug);
+
+    return {
+      id: String(post.id),
+      slug: slugVal,
+      title: titleText,
+      organization: orgName,
+      publishedDate: new Date(post.date).toISOString(),
+      deadline: deadline,
+      source: categories.join(','),
+      link: post.link,
+      location: 'Bangladesh',
+      content: rawContent.replace(/<a\b[^>]*>(.*?)<\/a>/gi, '$1').trim(),
+      imageUrls: imageUrls
+    };
+  };
+
+  const fetchSingleJobClientSide = async (jobId: string): Promise<Job | null> => {
+    try {
+      const response = await axios.get(`/api/job/${jobId}`);
+      if (response.data && response.data.id) {
+        return response.data;
+      }
+      throw new Error("Empty job response from server");
+    } catch (err) {
+      console.warn(`Server API failed for job ${jobId}. Attempting client-side single job direct fetch fallback...`, err);
+      try {
+        const isId = /^\d+$/.test(jobId);
+        const endpoint = isId
+          ? `https://bdgovtjob.net/wp-json/wp/v2/posts/${jobId}?_embed`
+          : `https://bdgovtjob.net/wp-json/wp/v2/posts?slug=${encodeURIComponent(jobId)}&_embed`;
+        
+        const wpResponse = await axios.get(endpoint, { timeout: 10000 });
+        const data = wpResponse.data;
+        const post = isId ? data : (Array.isArray(data) ? data[0] : null);
+        
+        if (post && post.id) {
+          const parsed = parsePostClientSide(post);
+          console.log("Successfully fetched and parsed single job client-side:", parsed);
+          return parsed;
+        }
+      } catch (clientErr) {
+        console.error(`Client-side direct single job fetch also failed for ${jobId}:`, clientErr);
+      }
+      return null;
+    }
+  };
+
   const fetchJobs = async (force: boolean = false) => {
     const CACHE_KEY = 'job_db_cache';
     let hasCachedData = false;
@@ -1268,65 +1347,97 @@ export default function App() {
       const response = await axios.get(`/api/jobs?full=true&t=${timestamp}`);
       const data = response.data;
       
-      if (Array.isArray(data) && data.length > 0) {
-        const fetchTimeNow = Date.now();
-        setLastSyncTime(fetchTimeNow);
-        // Refresh cache in background using idb
-        try {
-          await idbSet(CACHE_KEY, {
-            lastSyncTime: fetchTimeNow,
-            jobs: data
-          });
-        } catch (e) {
-          console.warn("Failed to set job cache to idb", e);
-        }
-        
-        // Always store all known IDs separately (takes very little space) to avoid false "new job" alerts
-        let lastKnownIds: string[] = [];
-        try {
-           const stored = localStorage.getItem('last_known_ids');
-           if (stored) {
-             const parsed = JSON.parse(stored);
-             lastKnownIds = Array.isArray(parsed) ? parsed : [];
-           }
-           const allIds = Array.from(new Set([...lastKnownIds, ...data.map((j: Job) => String(j.id))]));
-           localStorage.setItem('last_known_ids', JSON.stringify(allIds.slice(0, 500))); // keep last 500
-        } catch (e) {
-           // ignore
-        }
+      if (!Array.isArray(data) || data.length === 0) {
+        throw new Error("Server API returned empty or invalid data structure");
+      }
+      
+      const fetchTimeNow = Date.now();
+      setLastSyncTime(fetchTimeNow);
+      // Refresh cache in background using idb
+      try {
+        await idbSet(CACHE_KEY, {
+          lastSyncTime: fetchTimeNow,
+          jobs: data
+        });
+      } catch (e) {
+        console.warn("Failed to set job cache to idb", e);
+      }
+      
+      // Always store all known IDs separately (takes very little space) to avoid false "new job" alerts
+      let lastKnownIds: string[] = [];
+      try {
+         const stored = localStorage.getItem('last_known_ids');
+         if (stored) {
+           const parsed = JSON.parse(stored);
+           lastKnownIds = Array.isArray(parsed) ? parsed : [];
+         }
+         const allIds = Array.from(new Set([...lastKnownIds, ...data.map((j: Job) => String(j.id))]));
+         localStorage.setItem('last_known_ids', JSON.stringify(allIds.slice(0, 500))); // keep last 500
+      } catch (e) {
+         // ignore
+      }
 
-        if (hasCachedData) {
-          const existingIds = new Set(cachedJobs.map(j => String(j.id)));
-          const knownIdsSet = new Set(lastKnownIds);
-          const existingTitles = new Set(cachedJobs.map(j => j.title.toLowerCase()));
-          
-          const newJobs = data.filter(j => !existingIds.has(String(j.id)) && !knownIdsSet.has(String(j.id)) && !existingTitles.has(j.title.toLowerCase()));
-          
-          if (newJobs.length > 0 && cachedJobs.length > 0) {
-             // Instant show new jobs
-             setJobs(data);
-             setUpdateStatus('updated');
-             setTimeout(() => setUpdateStatus('idle'), 6000);
-          } else {
-             // If no completely new items, just update items silently
-             setJobs(data);
-             setUpdateStatus('up-to-date');
-             setTimeout(() => setUpdateStatus('idle'), 3000);
-          }
+      if (hasCachedData) {
+        const existingIds = new Set(cachedJobs.map(j => String(j.id)));
+        const knownIdsSet = new Set(lastKnownIds);
+        const existingTitles = new Set(cachedJobs.map(j => j.title.toLowerCase()));
+        
+        const newJobs = data.filter(j => !existingIds.has(String(j.id)) && !knownIdsSet.has(String(j.id)) && !existingTitles.has(j.title.toLowerCase()));
+        
+        if (newJobs.length > 0 && cachedJobs.length > 0) {
+           // Instant show new jobs
+           setJobs(data);
+           setUpdateStatus('updated');
+           setTimeout(() => setUpdateStatus('idle'), 6000);
         } else {
-          setJobs(data);
-          setLoading(false);
-          setUpdateStatus('idle');
+           // If no completely new items, just update items silently
+           setJobs(data);
+           setUpdateStatus('up-to-date');
+           setTimeout(() => setUpdateStatus('idle'), 3000);
         }
       } else {
-        if (hasCachedData) setUpdateStatus('idle');
+        setJobs(data);
+        setLoading(false);
+        setUpdateStatus('idle');
       }
     } catch (error) {
-      console.error('Failed to fetch jobs:', error);
-      if (!hasCachedData) {
-        setJobs(getFallbackJobs());
+      console.warn('Server API failed or returned empty. Attempting direct client-side WordPress fetch fallback:', error);
+      try {
+        setUpdateStatus('checking');
+        const wpResponse = await axios.get('https://bdgovtjob.net/wp-json/wp/v2/posts?_embed&per_page=100', {
+          timeout: 15000
+        });
+        const wpPosts = wpResponse.data;
+        if (Array.isArray(wpPosts) && wpPosts.length > 0) {
+          const parsedJobs = wpPosts.map((post: any) => parsePostClientSide(post));
+          console.log("Successfully fetched and parsed jobs client-side:", parsedJobs.length);
+          
+          const fetchTimeNow = Date.now();
+          setLastSyncTime(fetchTimeNow);
+          
+          // Save to IndexedDB
+          try {
+            await idbSet(CACHE_KEY, {
+              lastSyncTime: fetchTimeNow,
+              jobs: parsedJobs
+            });
+          } catch (e) {
+            console.warn("Failed to set client-side job cache to idb", e);
+          }
+          
+          setJobs(parsedJobs);
+          setUpdateStatus('updated');
+          setTimeout(() => setUpdateStatus('idle'), 6000);
+        } else {
+          throw new Error("Client-side WP REST API returned no posts");
+        }
+      } catch (clientError) {
+        console.error('Client-side direct WordPress fetch fallback also failed:', clientError);
+        if (!hasCachedData) {
+          setJobs(getFallbackJobs());
+        }
+        setUpdateStatus('idle');
       }
-      setUpdateStatus('idle');
     } finally {
       setLoading(false);
       setIsFirstVisit(false);
