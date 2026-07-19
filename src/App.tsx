@@ -1404,12 +1404,33 @@ export default function App() {
       console.warn('Server API failed or returned empty. Attempting direct client-side WordPress fetch fallback:', error);
       try {
         setUpdateStatus('checking');
-        const wpResponse = await axios.get('https://bdgovtjob.net/wp-json/wp/v2/posts?_embed&per_page=100', {
-          timeout: 15000
+        const pages = [1, 2, 3, 4, 5];
+        const pagePromises = pages.map(async (page) => {
+          try {
+            const res = await axios.get(`https://bdgovtjob.net/wp-json/wp/v2/posts?_embed&per_page=100&page=${page}`, {
+              timeout: 15000
+            });
+            if (Array.isArray(res.data)) {
+              return res.data;
+            }
+          } catch (e: any) {
+            console.warn(`Client-side WP fetch for page ${page} failed:`, e.message);
+          }
+          return [];
         });
-        const wpPosts = wpResponse.data;
+        const pageResults = await Promise.all(pagePromises);
+        const wpPosts = pageResults.flat();
+        
         if (Array.isArray(wpPosts) && wpPosts.length > 0) {
-          const parsedJobs = wpPosts.map((post: any) => parsePostClientSide(post));
+          const seenIds = new Set<string>();
+          const uniquePosts = wpPosts.filter((post: any) => {
+            if (!post || !post.id) return false;
+            const stringId = String(post.id);
+            if (seenIds.has(stringId)) return false;
+            seenIds.add(stringId);
+            return true;
+          });
+          const parsedJobs = uniquePosts.map((post: any) => parsePostClientSide(post));
           console.log("Successfully fetched and parsed jobs client-side:", parsedJobs.length);
           
           const fetchTimeNow = Date.now();

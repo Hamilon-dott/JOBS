@@ -29,30 +29,50 @@ export async function fetchLatestJobs(isFull: boolean) {
 
   const jobs: any[] = [];
   try {
-    const endpoint = 'https://bdgovtjob.net/wp-json/wp/v2/posts?_embed&per_page=100';
-    
-    // Cloudflare compatible safe timeout fetch with realistic browser headers
-    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const timeoutId = controller ? setTimeout(() => controller.abort(), 15000) : null;
-    const response = await fetch(endpoint, { 
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json',
-        'Accept-Language': 'en-US,en;q=0.9,bn;q=0.8'
-      },
-      signal: controller ? controller.signal : undefined 
+    const pages = [1, 2, 3, 4, 5];
+    const pagePromises = pages.map(async (page) => {
+      const endpoint = `https://bdgovtjob.net/wp-json/wp/v2/posts?_embed&per_page=100&page=${page}`;
+      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const timeoutId = controller ? setTimeout(() => controller.abort(), 20000) : null;
+      try {
+        const response = await fetch(endpoint, { 
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json',
+            'Accept-Language': 'en-US,en;q=0.9,bn;q=0.8'
+          },
+          signal: controller ? controller.signal : undefined 
+        });
+        if (timeoutId) clearTimeout(timeoutId);
+        
+        if (response.ok) {
+          const posts = await response.json();
+          if (Array.isArray(posts)) {
+            return posts;
+          }
+        } else {
+          const errText = await response.text().catch(() => '');
+          console.warn(`Page ${page} WordPress API returned status ${response.status}. Snippet: ${errText.substring(0, 100)}`);
+        }
+      } catch (err: any) {
+        console.error(`Failed to fetch page ${page}:`, err.message);
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+      }
+      return [];
     });
-    if (timeoutId) clearTimeout(timeoutId);
-    
-    if (!response.ok) {
-      const errText = await response.text().catch(() => '');
-      throw new Error(`WordPress API returned status ${response.status} ${response.statusText}. Snippet: ${errText.substring(0, 300)}`);
-    }
-    
-    const posts = await response.json();
 
-    if (Array.isArray(posts)) {
+    const results = await Promise.all(pagePromises);
+    const posts = results.flat();
+
+    if (posts.length > 0) {
+      const seenIds = new Set<string>();
       posts.forEach((post: any) => {
+        if (!post || !post.id) return;
+        const stringId = String(post.id);
+        if (seenIds.has(stringId)) return;
+        seenIds.add(stringId);
+
         const title = post.title?.rendered || "Job Circular";
         const titleText = title.replace(/&#8211;/g, '-').replace(/&#8217;/g, "'").replace(/<\/?[^>]+(>|$)/g, "").trim();
         const rawContent = post.content?.rendered || "";
