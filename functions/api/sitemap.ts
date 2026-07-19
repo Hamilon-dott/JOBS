@@ -1,26 +1,17 @@
-import { VercelRequest, VercelResponse } from '@vercel/node';
-import axios from 'axios';
-import https from 'https';
-
-const httpsAgent = new https.Agent({  
-  rejectUnauthorized: false
-});
-
 import * as cheerio from 'cheerio';
 
-// Slug generation function
 function generateSlug(title: string, orgName?: string | null, fallbackId?: string): string {
   const extractEnglish = (text?: string | null) => {
     if (!text) return '';
     return text
       .toLowerCase()
       .trim()
-      .replace(/[^a-z0-9\s-]/g, '') // Keep words in English language, numbers, spaces, hyphens
-      .replace(/\s+/g, '-') // Replace spaces with hyphens
-      .replace(/-+/g, '-') // Replace multiple hyphens with single
-      .replace(/^-+|-+$/g, ''); // Remove leading/trailing hyphens
+      .replace(/[^a-z0-9\s-]/g, '')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-+|-+$/g, '');
   };
-
+  
   let slug = extractEnglish(title);
   if (!slug || slug.length < 3) {
     if (orgName) {
@@ -30,35 +21,34 @@ function generateSlug(title: string, orgName?: string | null, fallbackId?: strin
       }
     }
   }
-
   return slug || fallbackId || '';
 }
 
 async function fetchJobSlugs() {
   const slugs: string[] = [];
   try {
-    // Fetch top 10 pages (1000 jobs) concurrently to prevent serverless timeouts
     const pageRequests = [];
     for (let page = 1; page <= 10; page++) {
       pageRequests.push(
-        axios.get(`https://bdgovtjob.net/wp-json/wp/v2/posts?per_page=100&page=${page}`, { 
-          httpsAgent,
-          timeout: 10000,
+        fetch(`https://bdgovtjob.net/wp-json/wp/v2/posts?per_page=100&page=${page}`, {
           headers: { 
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' 
-          }
-        }).catch(e => {
+             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' 
+           },
+           signal: AbortSignal.timeout(10000)
+        })
+        .then(res => res.json())
+        .catch(e => {
           console.error(`Sitemap fetch page ${page} failed`, e.message);
-          return null; // Return null so Promise.all still resolves for other pages
+          return null;
         })
       );
     }
     
     const responses = await Promise.all(pageRequests);
     
-    responses.forEach(response => {
-      if (response && response.data && Array.isArray(response.data)) {
-        response.data.forEach((post: any) => {
+    responses.forEach((data: any) => {
+      if (data && Array.isArray(data)) {
+        data.forEach((post: any) => {
           let titleText = post.title?.rendered || '';
           titleText = titleText.replace(/&#[0-9]+;/g, '-').replace(/<[^>]+>/g, '').trim();
           
@@ -77,17 +67,19 @@ async function fetchJobSlugs() {
   } catch (e) {
     console.error('Sitemap fetch failed', e);
   }
-  return [...new Set(slugs)]; // return unique slugs
+  return [...new Set(slugs)];
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const isLocalhost = (req.headers.host || '').includes('localhost');
-  const protocol = req.headers['x-forwarded-proto'] || 'https';
-  const baseUrl = isLocalhost ? `${protocol}://${req.headers.host}` : 'https://jobs.talukdaracademy.com.bd';
+export async function onRequest(context: any) {
+  const { request } = context;
+  const url = new URL(request.url);
+  const baseUrl = (url.hostname === 'localhost' || url.hostname === '127.0.0.1') 
+    ? `${url.protocol}//${url.host}` 
+    : 'https://jobs.talukdaracademy.com.bd';
   
   const jobSlugs = await fetchJobSlugs();
   const date = new Date().toISOString().split('T')[0];
-
+  
   const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
@@ -95,7 +87,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     <changefreq>always</changefreq>
     <priority>1.0</priority>
   </url>
-  ${jobSlugs.map(slug => `
+  ${jobSlugs.map((slug: string) => `
   <url>
     <loc>${baseUrl}/jobs/${slug}</loc>
     <lastmod>${date}</lastmod>
@@ -104,6 +96,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   </url>`).join('')}
 </urlset>`;
 
-  res.setHeader('Content-Type', 'application/xml');
-  res.status(200).send(sitemap);
+  return new Response(sitemap, {
+    status: 200,
+    headers: { 'Content-Type': 'application/xml' }
+  });
 }

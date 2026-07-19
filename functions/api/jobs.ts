@@ -1,14 +1,12 @@
-import { VercelRequest, VercelResponse } from '@vercel/node';
-import axios from 'axios';
-import * as cheerio from 'cheerio';
-import https from 'https';
 
-const httpsAgent = new https.Agent({  
-  rejectUnauthorized: false
-});
+
+import * as cheerio from 'cheerio';
+
+
+
 
 // Slug generation function
-function generateSlug(title: string, orgName?: string | null, fallbackId?: string): string {
+export function generateSlug(title: string, orgName?: string | null, fallbackId?: string): string {
   const extractEnglish = (text?: string | null) => {
     if (!text) return '';
     return text
@@ -185,14 +183,14 @@ async function fetchLatestJobs(isFull: boolean = false) {
         if (jobs.length >= targetCount) break;
 
         const timestamp = Date.now();
-        const response = await axios.get(`${source.baseUrl}&per_page=100&page=${page}&_t=${timestamp}`, { 
-          httpsAgent, 
-          timeout: 40000,
-          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+        const response = await fetch(`${source.baseUrl}&per_page=100&page=${page}&_t=${timestamp}`, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+          signal: AbortSignal.timeout(40000)
         });
-        
-        if (Array.isArray(response.data) && response.data.length > 0) {
-          response.data.forEach((post: any) => {
+        const data = await response.json();
+                
+        if (Array.isArray(data) && data.length > 0) {
+          data.forEach((post: any) => {
             if (jobs.length >= targetCount) return;
             
             const title = post.title?.rendered || "Job Circular";
@@ -368,7 +366,7 @@ async function fetchLatestJobs(isFull: boolean = false) {
   ];
 }
 
-async function fetchSingleJob(slugOrId: string) {
+export async function fetchSingleJob(slugOrId: string) {
   if (cachedJobsFull) {
     const cached = cachedJobsFull.find(j => j.id === slugOrId || j.slug === slugOrId);
     if (cached) return cached;
@@ -381,8 +379,9 @@ async function fetchSingleJob(slugOrId: string) {
       : `https://bdgovtjob.net/wp-json/wp/v2/posts?slug=${encodeURIComponent(slugOrId)}&_embed`;
 
     console.log("Fetching single job from API:", endpoint);
-    const response = await axios.get(endpoint, { timeout: 15000 });
-    const post = isId ? response.data : (Array.isArray(response.data) ? response.data[0] : null);
+    const response = await fetch(endpoint, { signal: AbortSignal.timeout(15000) });
+    const data = await response.json();
+    const post = isId ? data : (Array.isArray(data) ? data[0] : null);
 
     if (!post || !post.id) return null;
 
@@ -437,16 +436,27 @@ async function fetchSingleJob(slugOrId: string) {
   }
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export async function onRequest(context: any) {
+  const { request } = context;
+  const url = new URL(request.url);
   try {
-    const { id, full } = req.query;
+    const id = url.searchParams.get('id');
+    const full = url.searchParams.get('full');
     
     if (id) {
       const job = await fetchSingleJob(id as string);
       if (job) {
-        return res.status(200).json(job);
+        return new Response(JSON.stringify(job), {
+          status: 200,
+          headers: { 
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+          }
+        });
       } else {
-        return res.status(404).json({ error: 'Job not found' });
+        return new Response(JSON.stringify({ error: 'Job not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
       }
     }
 
@@ -454,13 +464,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const jobs = await fetchLatestJobs(isFull);
     
     // PREVENT CACHING: Tell Vercel and browsers to always revalidate
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
     
-    res.status(200).json(jobs);
+    
+    
+    
+    return new Response(JSON.stringify(jobs), {
+          status: 200,
+          headers: { 
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+          }
+        });
   } catch (error) {
     console.error('API Error:', error);
-    res.status(500).json({ error: 'Failed to fetch jobs' });
+    return new Response(JSON.stringify({ error: 'Failed to fetch jobs' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
   }
 }
