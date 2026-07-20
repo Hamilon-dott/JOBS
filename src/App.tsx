@@ -1536,10 +1536,10 @@ export default function App() {
       }
     }
     
-    // Front-end filter: Remove jobs that are more than 30 days past their deadline from the UI list
+    // Front-end filter: Remove jobs that are more than 180 days past their deadline from the UI list
     // This hides expired posts from the main feed, but keeps them accessible via direct URL for Google Indexing
     const daysRemaining = getDaysRemaining(job.deadline);
-    if (daysRemaining !== null && daysRemaining < -30) {
+    if (daysRemaining !== null && daysRemaining < -180) {
       matchesFilter = false;
     }
     
