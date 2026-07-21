@@ -1,0 +1,43 @@
+{
+  "version": 2,
+  "crons": [
+    {
+      "path": "/api/sync-firebase?full=true",
+      "schedule": "0 2 * * *"
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/api/job/:id",
+      "destination": "/api/jobs?id=:id"
+    },
+    {
+      "source": "/api/generate-summary",
+      "destination": "/api/generate-summary"
+    },
+    {
+      "source": "/api/sync-firebase",
+      "destination": "/api/sync-firebase"
+    },
+    {
+      "source": "/api/jobs",
+      "destination": "/api/jobs"
+    },
+    {
+      "source": "/sitemap.xml",
+      "destination": "/api/sitemap"
+    },
+    {
+      "source": "/news-sitemap.xml",
+      "destination": "/api/sitemap"
+    },
+    {
+      "source": "/robots.txt",
+      "destination": "/api/robots"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

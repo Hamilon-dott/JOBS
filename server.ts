@@ -1,394 +1,1153 @@
 import express from 'express';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
+import path from 'path';
+import axios from 'axios';
+import * as cheerio from 'cheerio';
+import https from 'https';
+import fs from 'fs';
+import os from 'os';
 import { GoogleGenAI } from '@google/genai';
-import { fetchSingleJob, fetchLatestJobs, generateSlug } from './functions/api/jobs.js';
+
+// Slug generation function
+function generateSlug(title: string, orgName?: string | null, fallbackId?: string, wpSlug?: string | null): string {
+  const extractEnglish = (text?: string | null) => {
+    if (!text) return '';
+    return text
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9\s-]/g, '') // Keep words in English language, numbers, spaces, hyphens
+      .replace(/\s+/g, '-') // Replace spaces with hyphens
+      .replace(/-+/g, '-') // Replace multiple hyphens with single
+      .replace(/^-+|-+$/g, ''); // Remove leading/trailing hyphens
+  };
+
+  let slug = wpSlug ? String(wpSlug).trim() : '';
+
+  if (!slug || /^\d+$/.test(slug)) {
+    slug = extractEnglish(title);
+    if (!slug || slug.length < 3 || /^\d+$/.test(slug)) {
+      if (orgName) {
+        const orgSlug = extractEnglish(orgName);
+        if (orgSlug && orgSlug.length >= 2 && !/^\d+$/.test(orgSlug)) {
+          slug = `${orgSlug}-job-circular`;
+        }
+      }
+    }
+  }
+
+  if (!slug || /^\d+$/.test(slug)) {
+    slug = fallbackId ? `job-circular-${fallbackId}` : `job-circular-${Date.now()}`;
+  }
+
+  return slug;
+}
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  // API Routes
+  app.use(express.json());
+
+  // Robots.txt
+  app.get('/robots.txt', (req, res) => {
+    const isLocalhost = (req.get('host') || '').includes('localhost');
+    const baseUrl = isLocalhost ? `${req.protocol}://${req.get('host')}` : 'https://jobs.talukdaracademy.com.bd';
+    res.type('text/plain');
+    res.send(`User-agent: *
+Allow: /
+Allow: /jobs/
+Disallow: /api/
+
+Sitemap: ${baseUrl}/sitemap.xml
+Sitemap: ${baseUrl}/news-sitemap.xml`);
+  });
+
+  // News Sitemap.xml for Google News
+  app.get('/news-sitemap.xml', async (req, res) => {
+    try {
+      const jobs = await fetchLatestJobs(true);
+      const host = req.get('host')?.includes('localhost') ? `${req.protocol}://${req.get('host')}` : 'https://jobs.talukdaracademy.com.bd';
+      
+      // Google News sitemaps should only contain URLs published in the last 2 days.
+      // We will filter or just include all if they are recent. (In this case, we'll just include the most recent 100).
+      const recentJobs = jobs.slice(0, 100);
+
+      const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">
+  ${recentJobs.map(job => `
+  <url>
+    <loc>${host}/jobs/${job.slug || generateSlug(job.title, job.organization, job.id)}</loc>
+    <news:news>
+      <news:publication>
+        <news:name>BD Govt Job Circular</news:name>
+        <news:language>bn</news:language>
+      </news:publication>
+      <news:publication_date>${new Date(job.publishedDate).toISOString()}</news:publication_date>
+      <news:title>${job.title.replace(/[<>&'"]/g, '')}</news:title>
+    </news:news>
+  </url>`).join('')}
+</urlset>`;
+
+      res.type('application/xml');
+      res.set('Cache-Control', 'no-cache, no-store, must-revalidate'); // prevent cloudflare static caching
+      res.send(sitemap);
+    } catch (error) {
+      console.error('Error generating news sitemap:', error);
+      res.status(500).send('Error generating news sitemap');
+    }
+  });
+
+  let cachedSitemapXml = '';
+  let lastSitemapFetch = 0;
+
+  // Sitemap.xml
+  app.get('/sitemap.xml', async (req, res) => {
+    try {
+      const host = req.get('host')?.includes('localhost') ? `${req.protocol}://${req.get('host')}` : 'https://jobs.talukdaracademy.com.bd';
+      const now = Date.now();
+      
+      if (cachedSitemapXml && now - lastSitemapFetch < 12 * 60 * 60 * 1000) {
+        res.type('application/xml');
+        res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+        return res.send(cachedSitemapXml);
+      }
+
+      let allPosts: any[] = [];
+      try {
+        const firstPage = await axios.get('https://bdgovtjob.net/wp-json/wp/v2/posts?_fields=id,slug,date,modified,title&per_page=100&page=1', { timeout: 15000, httpsAgent });
+        if (firstPage.data && Array.isArray(firstPage.data)) {
+          allPosts.push(...firstPage.data);
+          const totalPages = parseInt(firstPage.headers['x-wp-totalpages'] || '1');
+          
+          const MAX_CONCURRENT = 5;
+          for (let i = 2; i <= totalPages; i += MAX_CONCURRENT) {
+             const promises = [];
+             for (let j = i; j < i + MAX_CONCURRENT && j <= totalPages; j++) {
+                promises.push(axios.get(`https://bdgovtjob.net/wp-json/wp/v2/posts?_fields=id,slug,date,modified,title&per_page=100&page=${j}`, { timeout: 15000, httpsAgent }).then(r => r.data).catch(() => []));
+             }
+             const results = await Promise.all(promises);
+             results.forEach(res => {
+               if (Array.isArray(res)) allPosts.push(...res);
+             });
+          }
+        }
+      } catch (e) {
+        console.error('Failed to fetch full posts for sitemap', e);
+      }
+
+      if (allPosts.length === 0) {
+        const jobs = await fetchLatestJobs(true);
+        allPosts = jobs.map(j => ({ slug: j.slug, modified: j.publishedDate, date: j.publishedDate, id: j.id, title: { rendered: j.title } }));
+      }
+
+      const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>${host}/</loc>
+    <changefreq>always</changefreq>
+    <priority>1.0</priority>
+  </url>
+  ${allPosts.map(post => {
+    let jobSlug = post.slug;
+    if (!jobSlug || /^\\d+$/.test(jobSlug)) {
+      jobSlug = generateSlug(post.title?.rendered || 'Job', '', String(post.id), post.slug);
+    }
+    const lastMod = (post.modified || post.date || new Date().toISOString()).split('T')[0];
+    return `
+  <url>
+    <loc>${host}/jobs/${jobSlug}</loc>
+    <lastmod>${lastMod}</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.9</priority>
+  </url>`;
+  }).join('')}
+</urlset>`;
+
+      cachedSitemapXml = sitemap.replace(/&(?!(?:apos|quot|[lg]t|amp);|#)/g, '&amp;');
+      lastSitemapFetch = now;
+
+      res.type('application/xml');
+      res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.send(cachedSitemapXml);
+    } catch (error) {
+      console.error('Error generating sitemap:', error);
+      res.status(500).send('Error generating sitemap');
+    }
+  });
+
+  // API Route to fetch a single job
+  app.get('/api/job/:slugOrId', async (req, res) => {
+    try {
+      const job = await fetchSingleJob(req.params.slugOrId);
+      if (job) {
+        return res.json(job);
+      } else {
+        return res.status(404).json({ error: 'Job not found' });
+      }
+    } catch (e: any) {
+      console.error(e.message);
+      res.status(500).json({ error: 'Server error' });
+    }
+  });
+
+  // API Route to fetch jobs
   app.get('/api/jobs', async (req, res) => {
     try {
-      const id = req.query.id as string;
-      const full = req.query.full as string;
-      
-      if (id) {
-        const job = await fetchSingleJob(id);
-        if (job) {
-          res.setHeader('Content-Type', 'application/json; charset=utf-8');
-          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-          res.setHeader('Pragma', 'no-cache');
-          res.setHeader('Expires', '0');
-          res.status(200).json(job);
-        } else {
-          res.status(404).json({ error: 'Job not found' });
-        }
-        return;
-      }
-      
-      const isFull = full === 'true';
-      const jobs = await fetchLatestJobs(isFull);
-      
-      res.setHeader('Content-Type', 'application/json; charset=utf-8');
-      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-      res.setHeader('Pragma', 'no-cache');
-      res.setHeader('Expires', '0');
-      res.status(200).json(jobs);
+      const isFull = req.query.full === 'true';
+      const isAdmin = req.query.admin === 'true';
+      const jobs = await fetchLatestJobs(isFull, isAdmin);
+      res.json(jobs);
     } catch (error) {
-      console.error('API Error:', error);
+      console.error('Error fetching jobs:', error);
       res.status(500).json({ error: 'Failed to fetch jobs' });
     }
   });
 
-  app.get('/api/job/:slugOrId', async (req, res) => {
-    try {
-      const { slugOrId } = req.params;
-      const job = await fetchSingleJob(slugOrId);
-      if (job) {
-        res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.status(200).json(job);
-      } else {
-        res.status(404).json({ error: 'Job not found' });
-      }
-    } catch (error: any) {
-      console.error('API Error:', error);
-      res.status(500).json({ error: 'Failed to fetch job details' });
-    }
-  });
-
+  // API Route to manually sync jobs to server cache
   app.get('/api/sync-firebase', async (req, res) => {
     try {
-      const jobs = await fetchLatestJobs(true);
-      res.status(200).json({ success: true, count: jobs.length });
-    } catch (error: any) {
-      console.error('Sync Error:', error);
-      res.status(500).json({ success: false, error: 'Failed to sync cache', details: error.message });
+      const isFull = req.query.full === 'true';
+      // Force refresh of cache
+      const updatedJobs = await fetchJobsFromWP(isFull, true);
+      const jobsFilePath = path.join(os.tmpdir(), 'jobs.json');
+      await fs.promises.writeFile(jobsFilePath, JSON.stringify(updatedJobs, null, 2), 'utf8');
+      
+      // Clear memory caches so it reads fresh from file or WP next time
+      cachedJobsFull = null;
+      cachedJobsBrief = null;
+      singleJobMapCache.clear();
+
+      res.json({ success: true, count: updatedJobs.length, skipped: 0 });
+    } catch (error) {
+      console.error('Error syncing:', error);
+      res.status(500).json({ error: 'Failed to sync to cache' });
     }
   });
 
   app.post('/api/generate-summary', express.json(), async (req, res) => {
     try {
-      const { title, organization, content } = req.body;
-      if (!content) {
-        return res.status(400).json({ error: 'Content is required' });
-      }
-
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
-        return res.status(500).json({ error: 'GEMINI_API_KEY is not configured locally' });
+        // Just return a fallback summary if no API key
+        return res.json({ summary: "No API key configured." });
       }
 
-      const ai = new GoogleGenAI({
-        apiKey: apiKey,
-        httpOptions: {
-          headers: {
-            'User-Agent': 'aistudio-build',
-          }
-        }
-      });
-
-      const systemInstruction = `You are an expert job assistant in Bangladesh.
-Summarize the key details of this job circular in Bengali in a bulleted list.
-Include fields like:
-- প্রতিষ্ঠানের নাম (Organization Name)
-- পদের নাম (Job Title/Position)
-- খালি পদের সংখ্যা (Number of Vacancies)
-- শিক্ষাগত যোগ্যতা (Educational Qualification)
-- বেতন ও অন্যান্য সুযোগ-সুবিধা (Salary & Benefits)
-- আবেদনের শেষ তারিখ (Application Deadline)
-Format the output beautifully with standard Bengali markdown bullet points. Do not include introductory or concluding conversational text.`;
-
-      const prompt = `Title: ${title}
-Organization: ${organization}
-Content: ${content}`;
+      const ai = new GoogleGenAI({ apiKey });
+      const { title, organization, content } = req.body;
+      const prompt = `Please provide a 1-2 paragraph engaging summary in Bengali for the following job posting. 
+      Highlight the key benefits of this job and clearly explain who is eligible to apply in simple Bengali.
+      Be concise, professional, and encouraging. Do not use Markdown headings like # or ==, but bold texts are fine.
+      
+      Job Title: ${title}
+      Organization: ${organization}
+      Details: ${(content || '').substring(0, 4000)}`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-2.5-flash", // Use a stable and likely available model
         contents: prompt,
-        config: {
-          systemInstruction: systemInstruction,
-          temperature: 0.2,
-        },
       });
 
-      const summaryText = response.text || "সারসংক্ষেপ তৈরি করা সম্ভব হয়নি।";
-      res.setHeader('Content-Type', 'application/json; charset=utf-8');
-      res.status(200).json({ summary: summaryText });
+      return res.json({ summary: response.text || '' });
     } catch (error: any) {
-      console.error('Failed to generate summary:', error);
-      res.status(500).json({ error: 'Failed to generate summary', details: error.message });
+      console.error("Failed to generate summary via backend", error?.message || "Unknown error");
+      // Fallback summary if API fails due to permission denied or other errors
+      return res.json({ summary: "বিজ্ঞপ্তির সারাংশ তৈরি করা সম্ভব হয়নি (AI generation failed)। অনুগ্রহ করে নিচের বিস্তারিত তথ্য অথবা সার্কুলার ছবিটি দেখুন।" });
     }
   });
 
-  app.get('/api/sitemap', async (req, res) => {
-    try {
-      const host = 'https://jobs.talukdaracademy.com.bd';
-      const jobs = await fetchLatestJobs(true);
-      
-      let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
-      xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">\n`;
-      
-      xml += `  <url>\n`;
-      xml += `    <loc>${host}/</loc>\n`;
-      xml += `    <changefreq>daily</changefreq>\n`;
-      xml += `    <priority>1.0</priority>\n`;
-      xml += `  </url>\n`;
-      
-      jobs.forEach((job: any) => {
-        const slug = job.slug || generateSlug(job.title, job.organization, job.id);
-        const loc = `${host}/jobs/${slug}`;
-        const pubDate = job.publishedDate ? job.publishedDate.split('T')[0] : new Date().toISOString().split('T')[0];
-        const cleanTitle = (job.title || '').replace(/[<>&'"]/g, '');
-        
-        xml += `  <url>\n`;
-        xml += `    <loc>${loc}</loc>\n`;
-        xml += `    <lastmod>${pubDate}</lastmod>\n`;
-        xml += `    <changefreq>weekly</changefreq>\n`;
-        xml += `    <priority>0.8</priority>\n`;
-        xml += `    <news:news>\n`;
-        xml += `      <news:publication>\n`;
-        xml += `        <news:name>BD Govt Job Circular</news:name>\n`;
-        xml += `        <news:language>bn</news:language>\n`;
-        xml += `      </news:publication>\n`;
-        xml += `      <news:publication_date>${job.publishedDate}</news:publication_date>\n`;
-        xml += `      <news:title>${cleanTitle}</news:title>\n`;
-        xml += `    </news:news>\n`;
-        xml += `  </url>\n`;
-      });
-      
-      xml += `</urlset>\n`;
-      
-      res.setHeader('Content-Type', 'application/xml; charset=utf-8');
-      res.status(200).send(xml);
-    } catch (error) {
-      console.error('Failed to generate sitemap:', error);
-      res.status(500).send('Failed to generate sitemap');
-    }
-  });
+  // Schedule background sync daily at 1:00 PM Bangladesh Standard Time (BST = UTC+6), i.e., 07:00 AM UTC
+  function scheduleDailySyncAtOnePmBST() {
+    const getMsUntilNextRun = () => {
+      const now = new Date();
+      // Target is 7:00 AM UTC (which is 1:00 PM BST)
+      const targetUTC = new Date(Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        7, // 7:00 AM UTC
+        0, // 0 minutes
+        0, // 0 seconds
+        0  // 0 milliseconds
+      ));
 
-  app.get(['/sitemap.xml', '/news-sitemap.xml'], (req, res) => {
-    res.redirect('/api/sitemap');
-  });
+      // If 7:00 AM UTC has already passed today, target 7:00 AM UTC tomorrow
+      if (now.getTime() >= targetUTC.getTime()) {
+        targetUTC.setUTCDate(targetUTC.getUTCDate() + 1);
+      }
 
-  let vite: any;
+      return targetUTC.getTime() - now.getTime();
+    };
+
+    const planNext = () => {
+      const msToNext = getMsUntilNextRun();
+      const hoursToNext = (msToNext / (1000 * 60 * 60)).toFixed(2);
+      console.log(`[BST Scheduler] Next daily sync (1:00 PM BST / 7:00 AM UTC) is scheduled in ${hoursToNext} hours.`);
+      
+      setTimeout(async () => {
+        console.log("[BST Scheduler] It is 1:00 PM BST. Starting scheduled daily fetch...");
+        try {
+          const updatedJobs = await fetchJobsFromWP(true, true); // Force full background fetch
+          const jobsFilePath = path.join(os.tmpdir(), 'jobs.json');
+          await fs.promises.writeFile(jobsFilePath, JSON.stringify(updatedJobs, null, 2), 'utf8');
+          cachedJobsFull = null;
+          cachedJobsBrief = null;
+          singleJobMapCache.clear();
+          console.log("[BST Scheduler] Fetch complete & jobs cache updated in /tmp");
+        } catch (error) {
+          console.error("[BST Scheduler] Scheduled fetch error:", error);
+        }
+        // Plan next run for the following day
+        planNext();
+      }, msToNext);
+    };
+
+    planNext();
+  }
+
+  scheduleDailySyncAtOnePmBST();
+
+  // Vite integration
+  let vite;
   if (process.env.NODE_ENV !== 'production') {
     vite = await createViteServer({
       server: { middlewareMode: true },
-      appType: 'spa',
+      appType: 'custom',
     });
+    
+    app.use((req, res, next) => {
+      // 301 Redirect old query params to new path structure
+      if (req.query.job) {
+        return res.redirect(301, `/jobs/${req.query.job}`);
+      }
+      next();
+    });
+    
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath, { index: false }));
   }
 
-  // SEO middleware
-  app.get('*', async (req, res, next) => {
-    if (
-      req.path.startsWith('/api/') ||
-      req.path.match(/\.(png|jpg|jpeg|gif|css|js|ts|tsx|ico|xml|txt|json)$/i)
-    ) {
-      return next();
+  app.get('*', async (req, res) => {
+    // 301 Redirect trailing slashes
+    if (req.path.length > 1 && req.path.endsWith('/')) {
+      const query = req.url.slice(req.path.length);
+      return res.redirect(301, req.path.slice(0, -1) + query);
     }
-
+    
+    // 301 Redirect old query params to new path structure
+    if (req.query.job) {
+      return res.redirect(301, `/jobs/${req.query.job}`);
+    }
+    
     try {
-      const protocol = req.headers['x-forwarded-proto'] || req.protocol;
-      const host = `${protocol}://${req.get('host')}`;
-      
-      let reqPath = req.path;
-      if (reqPath === '/index.html') reqPath = '/';
-      else if (reqPath.length > 1 && reqPath.endsWith('/')) reqPath = reqPath.slice(0, -1);
-      
-      let canonicalUrl = host + reqPath;
-      let pageTitle = "BD Govt Job Circular 2026 - Government and Bank Jobs";
-      let pageDescription = "Find the latest Government and Bank job circulars, notices, and exam results in Bangladesh. Updated daily.";
-      
-      const searchQuery = req.query.search || req.query.q || '';
-      if (searchQuery) {
-        const cleanQuery = String(searchQuery).replace(/[<>&'"]/g, '');
-        pageTitle = `${cleanQuery} - BD Govt Job Circular 2026 | All Govt Jobs BD`;
-        pageDescription = `Get all recent results and recruitment notices matching "${cleanQuery}" in the Bangladesh Government and Bank Job Circular 2026. Find eligibility and apply now.`;
-      }
-      
-      let ogImageUrl = host + '/govtlog.png';
-
-      let isJobPage = false;
-      const isJobsRoute = req.path.match(/^\/jobs\/([^/]+)\/?$/);
-      const isLegacyRoute = req.path.match(/^\/([^/]+)\/?$/);
-      let jobSlugUrl = '';
-      
-      if (isJobsRoute) {
-        jobSlugUrl = decodeURIComponent(isJobsRoute[1]);
-      } else if (isLegacyRoute && !isLegacyRoute[1].includes('.') && isLegacyRoute[1] !== 'api') {
-        jobSlugUrl = decodeURIComponent(isLegacyRoute[1]);
+      let data = '';
+      if (process.env.NODE_ENV !== 'production') {
+        data = await fs.promises.readFile(path.join(process.cwd(), 'index.html'), 'utf8');
+        data = await vite.transformIndexHtml(req.originalUrl, data);
+      } else {
+        const distPath = path.join(process.cwd(), 'dist');
+        data = await fs.promises.readFile(path.join(distPath, 'index.html'), 'utf8');
       }
 
-      let staticContent = '';
-      let finalStatus = 200;
-
-      if (jobSlugUrl) {
-        const job = await fetchSingleJob(jobSlugUrl);
-        if (job) {
-          const standardSlug = job.slug || generateSlug(job.title, job.organization, job.id);
-          
-          if (!isJobsRoute || standardSlug !== jobSlugUrl) {
-            return res.redirect(301, `/jobs/${standardSlug}`);
-          }
-          
-          canonicalUrl = `${host}/jobs/${standardSlug}`;
-          isJobPage = true;
-          
-          const cleanedTitle = job.title.replace(/[<>&'"]/g, '');
-          const cleanedOrg = (job.organization || '').replace(/[<>&'"]/g, '');
-          
-          pageTitle = `${cleanedTitle} - ${cleanedOrg}`;
-          ogImageUrl = job.imageUrls?.[0] || host + '/govtlog.png';
-          
-          let noHtmlContent = job.content.replace(/<[^>]*>?/gm, '');
-          noHtmlContent = noHtmlContent.replace(/\s+/g, ' ').trim();
-          pageDescription = noHtmlContent.length > 150 ? noHtmlContent.substring(0, 150) + '...' : noHtmlContent;
-          
-          const jsonLd = [
-            {
-              "@context": "https://schema.org/",
-              "@type": "NewsArticle",
-              "headline": cleanedTitle,
-              "description": pageDescription,
-              "datePublished": job.publishedDate,
-              "dateModified": job.publishedDate,
-              "author": {
-                "@type": "Organization",
-                "name": "BD Govt Job Circular"
-              },
-              "publisher": {
-                "@type": "Organization",
-                "name": "BD Govt Job Circular",
-                "logo": {
-                  "@type": "ImageObject",
-                  "url": host + "/govtlog.png"
-                }
-              },
-              "image": [ ogImageUrl ],
-              "mainEntityOfPage": {
-                "@type": "WebPage",
-                "@id": canonicalUrl
-              }
-            },
-            {
-              "@context": "https://schema.org/",
-              "@type": "JobPosting",
-              "title": cleanedTitle,
-              "description": pageDescription,
-              "datePosted": job.publishedDate,
-              "validThrough": job.deadlineISO || new Date(new Date(job.publishedDate).getTime() + 30*24*60*60*1000).toISOString(),
-              "hiringOrganization": {
-                "@type": "Organization",
-                "name": cleanedOrg || "BD Govt Job Circular"
-              },
-              "jobLocation": {
-                "@type": "Place",
-                "address": {
-                  "@type": "PostalAddress",
-                  "addressCountry": "BD"
-                }
-              },
-              "employmentType": "FULL_TIME",
-              "url": canonicalUrl
-            }
-          ];
-          
-          staticContent = `
-            <script type="application/ld+json">
-              ${JSON.stringify(jsonLd)}
-            </script>
-            <script>
-              window.__INITIAL_JOB__ = ${JSON.stringify(job).replace(/<\/script>/g, '<\\/script>')};
-            </script>
-            <noscript>
-              <article itemscope itemtype="http://schema.org/NewsArticle">
-                <h1 itemprop="headline">${cleanedTitle}</h1>
-                <h2 itemprop="publisher">${cleanedOrg}</h2>
-                <p itemprop="datePublished">${job.publishedDate}</p>
-                <div itemprop="articleBody">${job.content}</div>
-              </article>
-            </noscript>
-          `;
-        } else {
-          finalStatus = 404;
-        }
-      }
-
-      if (!isJobPage) {
-        const websiteSchema = {
-          "@context": "https://schema.org",
-          "@type": "WebSite",
-          "name": "BD Govt Job Circular 2026",
-          "alternateName": "Talukdar Academy Jobs",
-          "url": host,
-          "potentialAction": {
-            "@type": "SearchAction",
-            "target": `${host}/?search={search_term_string}`,
-            "query-input": "required name=search_term_string"
-          }
-        };
-        staticContent = `<script type="application/ld+json">${JSON.stringify(websiteSchema)}</script>`;
-      }
-
-      const newHead = `
-        <title>${pageTitle}</title>
-        <meta name="description" content="${pageDescription}" />
-        <link rel="canonical" href="${canonicalUrl}" />
-        <meta property="og:title" content="${pageTitle}">
-        <meta property="og:description" content="${pageDescription}">
-        <meta property="og:url" content="${canonicalUrl}">
-        <meta property="og:image" content="${ogImageUrl}">
-        <meta property="og:type" content="website">
-        <meta property="og:site_name" content="BD Govt Job Circular">
-        <meta name="twitter:card" content="summary_large_image">
-        <meta name="twitter:title" content="${pageTitle}">
-        <meta name="twitter:description" content="${pageDescription}">
-        <meta name="twitter:image" content="${ogImageUrl}">
-      `;
-
-      let html = '';
-      if (vite) {
-        html = await vite.ssrLoadModule('/src/main.tsx').catch(() => ''); // Load module correctly if needed, but for SPA we usually just read index.html
+        const host = req.get('host')?.includes('localhost') ? `${req.protocol}://${req.get('host')}` : 'https://jobs.talukdaracademy.com.bd';
         
-        // Actually for Vite SPA, we read the index.html and transform it
-        const fs = await import('fs/promises');
-        let rawHtml = await fs.readFile(path.join(process.cwd(), 'index.html'), 'utf-8');
-        html = await vite.transformIndexHtml(req.originalUrl, rawHtml);
-      } else {
-        const fs = await import('fs/promises');
-        html = await fs.readFile(path.join(process.cwd(), 'dist', 'index.html'), 'utf-8');
-      }
+        // ক্যানোনিকাল (Canonical) URL-এর জন্য শেষে থাকা স্লাশ (/) বাদ দিচ্ছি, তবে হোমপেজ হলে থাকবে
+        let reqPath = req.path;
+        if (reqPath === '/index.html') {
+          reqPath = '/';
+        } else if (reqPath.length > 1 && reqPath.endsWith('/')) {
+          reqPath = reqPath.slice(0, -1);
+        }
 
-      html = html.replace(/<link\s+rel="canonical"[^>]*>/gi, '');
-      html = html.replace(/<title>.*?<\/title>/gi, '');
-      html = html.replace(/<meta\s+name="description"\s+content="[^"]*"\s*\/?>/gi, '');
-      html = html.replace(/<meta property="og:.*?" content=".*?">\s*/gi, '');
+        let canonicalUrl = host + reqPath;
+        
+        let updatedHtml = data;
+        let pageTitle = "BD Govt Job Circular 2026 - Government and Bank Jobs";
+        let pageDescription = "Find the latest Government and Bank job circulars, notices, and exam results in Bangladesh. Updated daily.";
+        
+        const searchQuery = req.query.search || req.query.q || '';
+        if (searchQuery) {
+          const cleanQuery = String(searchQuery).replace(/[<>&'"]/g, '');
+          pageTitle = `${cleanQuery} - BD Govt Job Circular 2026 | All Govt Jobs BD`;
+          pageDescription = `Get all recent results and recruitment notices matching "${cleanQuery}" in the Bangladesh Government and Bank Job Circular 2026. Find eligibility and apply now.`;
+        }
+        
+        let ogImageUrl = host + '/govtlog.png';
+        
+        // ডিফল্ট canonical ট্যাগটি মুছে দিচ্ছি, যেন ডাইনামিক ট্যাগ যুক্ত করতে পারি
+        updatedHtml = updatedHtml.replace(/<link\s+rel="canonical"[^>]*>/gi, '');
+        // Title রিপ্রেস করছি
+        updatedHtml = updatedHtml.replace(/<title>.*?<\/title>/gi, '');
+        // Generic description সরিয়ে দিচ্ছি
+        updatedHtml = updatedHtml.replace(/<meta\s+name="description"\s+content="[^"]*"\s*\/?>/gi, '');
+        // Generic og tags মুছে দিচ্ছি
+        updatedHtml = updatedHtml.replace(/<meta property="og:.*?" content=".*?">\s*/gi, '');
 
-      if (html.includes('<div id="root"></div>')) {
-        html = html.replace('<div id="root"></div>', `${staticContent}\n<div id="root"></div>`);
-      } else {
-        html = html.replace('<body>', `<body>\n${staticContent}`);
-      }
+        let isJobPage = false;
 
-      html = html.replace('</head>', `${newHead}\n</head>`);
+        // url param বা query parameter অনুযায়ী জবের আসল ডেটা খুঁজে বের করা হচ্ছে
+        const isJobsRoute = req.path.match(/^\/jobs\/([^/]+)\/?$/);
+        const isLegacyRoute = req.path.match(/^\/([^/]+)\/?$/);
+        
+        let jobSlugUrl = '';
+        if (isJobsRoute) {
+          jobSlugUrl = decodeURIComponent(isJobsRoute[1]);
+        } else if (isLegacyRoute && !isLegacyRoute[1].includes('.') && isLegacyRoute[1] !== 'api' && isLegacyRoute[1] !== 'sitemap.xml' && isLegacyRoute[1] !== 'news-sitemap.xml' && isLegacyRoute[1] !== 'robots.txt') {
+          jobSlugUrl = decodeURIComponent(isLegacyRoute[1]);
+        }
 
-      res.status(finalStatus).send(html);
+        if (jobSlugUrl) {
+          try {
+            const job = await fetchSingleJob(jobSlugUrl);
+            if (job) {
+              const standardSlug = job.slug || generateSlug(job.title, job.organization, job.id);
+              
+              // যদি URL-এর সাথে আসল canonical স্লাগের মিল না থাকে বা পুরনো রুট হয়, তাহলে 301 Permanent Redirect করা হচ্ছে
+              if (!isJobsRoute || standardSlug !== jobSlugUrl) {
+                return res.redirect(301, `/jobs/${standardSlug}`);
+              }
+              
+              // সঠিক Canonical URL নির্ধারণ করা হচ্ছে
+              canonicalUrl = `${host}/jobs/${standardSlug}`;
+              isJobPage = true;
+              
+              const cleanedTitle = job.title.replace(/[<>&'"]/g, '');
+              const cleanedOrg = (job.organization || '').replace(/[<>&'"]/g, '');
+              pageTitle = `${cleanedTitle} - ${cleanedOrg}`;
+              ogImageUrl = job.imageUrls?.[0] || host + '/govtlog.png';
+              
+              // Extract a short description from content
+              let noHtmlContent = job.content.replace(/<[^>]*>?/gm, '');
+              noHtmlContent = noHtmlContent.replace(/\s+/g, ' ').trim();
+              pageDescription = noHtmlContent.length > 150 ? noHtmlContent.substring(0, 150) + '...' : noHtmlContent;
+              
+              const jsonLd = [
+                {
+                  "@context": "https://schema.org/",
+                  "@type": "NewsArticle",
+                  "headline": cleanedTitle,
+                  "description": pageDescription,
+                  "datePublished": job.publishedDate,
+                  "dateModified": job.publishedDate,
+                  "author": {
+                    "@type": "Organization",
+                    "name": "BD Govt Job Circular"
+                  },
+                  "publisher": {
+                    "@type": "Organization",
+                    "name": "BD Govt Job Circular",
+                    "logo": {
+                      "@type": "ImageObject",
+                      "url": host + "/govtlog.png"
+                    }
+                  },
+                  "image": [ ogImageUrl ],
+                  "mainEntityOfPage": {
+                    "@type": "WebPage",
+                    "@id": canonicalUrl
+                  }
+                },
+                {
+                  "@context": "https://schema.org/",
+                  "@type": "JobPosting",
+                  "title": cleanedTitle,
+                  "description": pageDescription,
+                  "datePosted": job.publishedDate,
+                  "validThrough": job.deadlineISO || new Date(new Date(job.publishedDate).getTime() + 30*24*60*60*1000).toISOString(),
+                  "hiringOrganization": {
+                    "@type": "Organization",
+                    "name": cleanedOrg || "BD Govt Job Circular"
+                  },
+                  "jobLocation": {
+                    "@type": "Place",
+                    "address": {
+                      "@type": "PostalAddress",
+                      "addressCountry": "BD"
+                    }
+                  },
+                  "employmentType": "FULL_TIME",
+                  "url": canonicalUrl
+                }
+              ];
+              
+              const staticContent = `
+                <script type="application/ld+json">
+                  ${JSON.stringify(jsonLd)}
+                </script>
+                <script>
+                  window.__INITIAL_JOB__ = ${JSON.stringify(job).replace(/<\/script>/g, '<\\/script>')};
+                </script>
+                <noscript>
+                  <article itemscope itemtype="http://schema.org/NewsArticle">
+                    <h1 itemprop="headline">${cleanedTitle}</h1>
+                    <h2 itemprop="publisher">${cleanedOrg}</h2>
+                    <p itemprop="datePublished">${job.publishedDate}</p>
+                    <div itemprop="articleBody">${job.content}</div>
+                  </article>
+                </noscript>
+              `;
+              if (updatedHtml.includes('<div id="root"></div>')) {
+                updatedHtml = updatedHtml.replace('<div id="root"></div>', `${staticContent}\n<div id="root"></div>`);
+              } else {
+                updatedHtml = updatedHtml.replace('<body>', `<body>\n${staticContent}`);
+              }
+            } else {
+              // Job not found, revert to fallback home page canonical
+              canonicalUrl = host + '/';
+            }
+          } catch (e) {
+            console.error('Failed to fetch job for SEO rendering:', e);
+            canonicalUrl = host + '/';
+          }
+        } else {
+          // Homepage or other pages
+          canonicalUrl = host + '/';
+          
+          const websiteSchema = {
+            "@context": "https://schema.org",
+            "@type": "WebSite",
+            "name": "BD Govt Job Circular 2026",
+            "alternateName": "Talukdar Academy Jobs",
+            "url": host,
+            "potentialAction": {
+              "@type": "SearchAction",
+              "target": `${host}/?search={search_term_string}`,
+              "query-input": "required name=search_term_string"
+            }
+          };
+          
+          const staticContent = `
+            <script type="application/ld+json">
+              ${JSON.stringify(websiteSchema)}
+            </script>
+          `;
+          if (updatedHtml.includes('<div id="root"></div>')) {
+            updatedHtml = updatedHtml.replace('<div id="root"></div>', `${staticContent}\n<div id="root"></div>`);
+          } else {
+            updatedHtml = updatedHtml.replace('<body>', `<body>\n${staticContent}`);
+          }
+        }
+        
+        // Add meta tags for better indexing
+        const metaTags = `
+  <title>${pageTitle}</title>
+  <meta name="description" content="${pageDescription.replace(/"/g, '&quot;')}">
+  <meta property="og:title" content="${pageTitle}">
+  <meta property="og:description" content="${pageDescription.replace(/"/g, '&quot;')}">
+  <meta property="og:url" content="${canonicalUrl}">
+  <meta property="og:type" content="${isJobPage ? 'article' : 'website'}">
+  <meta property="og:image" content="${ogImageUrl}">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="${isJobPage ? pageTitle : 'BD Govt Job Circular'}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="${pageTitle}">
+  <meta name="twitter:description" content="${pageDescription.replace(/"/g, '&quot;')}">
+  <meta name="twitter:image" content="${ogImageUrl}">
+  <link rel="canonical" href="${canonicalUrl}">
+`;
+        updatedHtml = updatedHtml.replace('</head>', `${metaTags}\n  </head>`);
+        
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(updatedHtml);
     } catch (e) {
-      console.error(e);
-      next(e);
+      if (process.env.NODE_ENV !== 'production' && vite) {
+        vite.ssrFixStacktrace(e);
+      }
+      res.status(500).end(e.message);
     }
   });
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on port ${PORT}`);
+    console.log(`Server running at http://localhost:${PORT}`);
   });
+}
+
+const httpsAgent = new https.Agent({  
+  rejectUnauthorized: false
+});
+
+// Helper to parse Bengali/English deadline strings
+const parseDeadline = (deadlineStr: string): Date | null => {
+  if (!deadlineStr || deadlineStr.includes('দেখুন') || deadlineStr.includes('চলমান')) return null;
+  
+  // Convert Bengali numerals to English
+  const bengaliToEnglish = (str: string) => {
+    const numerals: { [key: string]: string } = {
+      '০': '0', '১': '1', '২': '2', '৩': '3', '৪': '4', '৫': '5', '৬': '6', '৭': '7', '৮': '8', '৯': '9'
+    };
+    return str.replace(/[০-৯]/g, d => numerals[d]);
+  };
+
+  let cleanStr = bengaliToEnglish(deadlineStr);
+  
+  // Support common separators
+  cleanStr = cleanStr.replace(/[।\/]/g, '-').replace(/\s+/g, ' ').trim();
+
+  // Mapping for Bengali months
+  const months: { [key: string]: string } = {
+    'জানুয়ারি': 'January', 'জানুয়ারী': 'January',
+    'ফেব্রুয়ারি': 'February', 'ফেব্রুয়ারী': 'February',
+    'মার্চ': 'March',
+    'এপ্রিল': 'April',
+    'মে': 'May',
+    'জুন': 'June',
+    'জুলাই': 'July',
+    'আগস্ট': 'August', 'আগষ্ট': 'August',
+    'সেপ্টেম্বর': 'September', 'সেপ্টেম্বার': 'September',
+    'অক্টোবর': 'October', 'অক্টোবার': 'October',
+    'নভেম্বর': 'November', 'নভেম্বার': 'November',
+    'ডিসেম্বর': 'December', 'ডিসেম্বার': 'December'
+  };
+
+  Object.keys(months).forEach(m => {
+    cleanStr = cleanStr.replace(new RegExp(m, 'i'), months[m]);
+  });
+
+  // Handle DD-MM-YYYY or DD-Month-YYYY
+  const parts = cleanStr.split(/[-\s]/);
+  if (parts.length >= 3) {
+    // Try to reformat for JS Date if parts are like [30, May, 2024]
+    const day = parts[0];
+    const month = parts[1];
+    const year = parts[2];
+    
+    // If month is a number (05), ensure it works. 
+    // JavaScript Date handles "2024-05-30" better than "30-05-2024"
+    if (!isNaN(parseInt(day)) && !isNaN(parseInt(month)) && !isNaN(parseInt(year))) {
+      if (year.length === 4) {
+         cleanStr = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+      }
+    }
+  }
+
+  const date = new Date(cleanStr);
+  return isNaN(date.getTime()) ? null : date;
+};
+
+// Helper to parse complex/simple Bengali or English dates
+const parseBengaliDate = (dateStr: string): Date | null => {
+  if (!dateStr) return null;
+  
+  // Convert Bengali numerals to English
+  const bengaliToEnglish = (str: string) => {
+    const numerals: { [key: string]: string } = {
+      '০': '0', '১': '1', '২': '2', '৩': '3', '৪': '4', '৫': '5', '৬': '6', '৭': '7', '৮': '8', '৯': '9'
+    };
+    return str.replace(/[০-৯]/g, d => numerals[d]);
+  };
+
+  // 1. Clean the string
+  let cleanStr = dateStr.replace(/[।\.]/g, '').replace(/\s+/g, ' ').trim();
+  
+  // 2. If it contains multiple dates separated by comma, "ও", "এবং", we want the last one because the last one usually contains the full month and year.
+  // E.g. "২২ এপ্রিল, ১১, ১৩ ও ২১ মে ২০২৬" -> "২১ মে ২০২৬"
+  // E.g. "১৪ ও ১৯ মে ২০২৬" -> "১৯ মে ২০২৬"
+  const parts = cleanStr.split(/[,&|\sওএবং]+/);
+  
+  const monthsList = [
+    'জানুয়ারি', 'জানুয়ারী', 'ফেব্রুয়ারি', 'ফেব্রুয়ারী', 'মার্চ', 'এপ্রিল', 
+    'মে', 'জুন', 'জুলাই', 'আগস্ট', 'আগষ্ট', 'সেপ্টেম্বর', 'সেপ্টেম্বার', 
+    'অক্টোবর', 'অক্টোবার', 'নভেম্বর', 'নভেম্বার', 'ডিসেম্বর', 'ডিসেম্বার',
+    'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'
+  ];
+
+  const monthsMap: { [key: string]: string } = {
+    'জানুয়ারি': 'January', 'জানুয়ারী': 'January',
+    'ফেব্রুয়ারি': 'February', 'ফেব্রুয়ারী': 'February',
+    'মার্চ': 'March',
+    'এপ্রিল': 'April',
+    'মে': 'May',
+    'জুন': 'June',
+    'জুলাই': 'July',
+    'আগস্ট': 'August', 'আগষ্ট': 'August',
+    'সেপ্টেম্বর': 'September', 'সেপ্টেম্বার': 'September',
+    'অক্টোবর': 'October', 'অক্টোবার': 'October',
+    'নভেম্বর': 'November', 'নভেম্বার': 'November',
+    'ডিসেম্বর': 'December', 'ডিসেম্বার': 'December'
+  };
+
+  let year: string | null = null;
+  let month: string | null = null;
+  let day: string | null = null;
+
+  // Search from right to left to grab the latest fully formed date
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const part = parts[i].trim();
+    const cleanPart = bengaliToEnglish(part);
+    
+    if (!year && /^\d{4}$/.test(cleanPart)) {
+      year = cleanPart;
+      continue;
+    }
+    
+    const lowerPart = part.toLowerCase();
+    const matchedMonthKey = monthsList.find(m => lowerPart.includes(m));
+    if (!month && matchedMonthKey) {
+      month = monthsMap[matchedMonthKey] || matchedMonthKey;
+      continue;
+    }
+    
+    if (!day && /^\d{1,2}$/.test(cleanPart)) {
+      day = cleanPart;
+      continue;
+    }
+  }
+
+  if (!year || !month || !day) {
+    const englishCleanStr = bengaliToEnglish(cleanStr);
+    const regex = /(\d{1,2})\s+([^\s\d,]+)\s+(\d{4})/;
+    const match = englishCleanStr.match(regex);
+    if (match) {
+      day = match[1];
+      const mText = match[2].toLowerCase();
+      const matchedMonthKey = monthsList.find(m => mText.includes(m));
+      if (matchedMonthKey) {
+        month = monthsMap[matchedMonthKey] || matchedMonthKey;
+      }
+      year = match[3];
+    }
+  }
+
+  if (year && month && day) {
+    const dateFormattedStr = `${day} ${month} ${year}`;
+    const date = new Date(dateFormattedStr);
+    if (!isNaN(date.getTime())) {
+      return date;
+    }
+  }
+
+  return null;
+};
+
+// Function to process a WordPress post into a Job object
+function processWpPost(post: any, sourceName: string, thirtyDaysAgo: Date, today: Date, parseDeadline: Function) {
+  const title = post.title?.rendered || "Job Circular";
+  const titleText = title.replace(/&#8211;/g, '-').replace(/&#8217;/g, "'").replace(/<\/?[^>]+(>|$)/g, "").trim();
+
+  const rawContent = post.content?.rendered || "";
+  const $ = cheerio.load(rawContent);
+
+  const extractFromTableOrText = (labels: string[]) => {
+    let result = null;
+    $('tr').each((_, row) => {
+      const rowText = $(row).text().toLowerCase();
+      if (labels.some(label => rowText.includes(label.toLowerCase()))) {
+        const value = $(row).find('td').last().text().trim();
+        if (value && value.length > 2 && value.length < 150) {
+          result = value;
+          return false;
+        }
+      }
+    });
+    if (result) return result;
+
+    for (const label of labels) {
+      const regex = new RegExp(`${label}\\s*[:\sম=]+(?:<[^>]+>)*\s*([^<>\n]+)`, 'i');
+      const match = rawContent.match(regex);
+      if (match && match[1]) {
+        const val = match[1].replace(/<\/?[^>]+(>|$)/g, "").trim();
+        if (val.length > 2 && val.length < 150) return val;
+      }
+    }
+    return null;
+  };
+
+  const deadline = extractFromTableOrText(['আবেদনের শেষ তারিখ', 'আবেদনের শেষ সময়', 'আবেদন শেষ', 'Last Date', 'Deadline']) || "সার্কুলার দেখুন";
+  const deadlineDate = parseDeadline(deadline);
+
+  // Extract custom publication date from post content when available, with fallback to post create date
+  let customPubDate: Date | null = null;
+  const pubDateText = extractFromTableOrText(['বিজ্ঞপ্তি প্রকাশের তারিখ', 'প্রকাশের তারিখ', 'বিজ্ঞপ্তি প্রকাশ', 'Publish Date', 'Published Date']);
+  if (pubDateText) {
+    const parsedCustom = parseBengaliDate(pubDateText);
+    if (parsedCustom && !isNaN(parsedCustom.getTime())) {
+      const yr = parsedCustom.getFullYear();
+      if (yr >= 2020 && yr <= 2035) {
+        customPubDate = parsedCustom;
+      }
+    }
+  }
+
+  // Use custom publication date or fallback to post create date
+  const postPubDate = new Date(post.date_gmt && post.date_gmt !== '0001-11-30T00:00:00' ? `${post.date_gmt}Z` : post.date);
+  const pubDate = customPubDate || postPubDate;
+
+  // Improved Image Extraction (Multiple)
+  const imgMatches = rawContent.matchAll(/src=["']([^"'>]+\.(?:jpg|jpeg|png|webp|gif)[^"'>]*)["']/gi);
+  const imageUrls = Array.from(imgMatches, m => m[1]);
+
+  let categories: string[] = [];
+  const embeddedTerms = post._embedded?.['wp:term']?.flat() || [];
+  const termNames = embeddedTerms.map((t: any) => t.name.toLowerCase());
+  const titleLower = title.toLowerCase();
+
+  const hasGovtTag = termNames.some((name: string) => name === 'সরকারি চাকরি' || name.includes('govt job') || name === 'government job');
+  const hasBankTag = termNames.some((name: string) => name === 'ব্যাংক চাকরির খবর' || name.includes('bank job') || name === 'bank');
+  const isGovtPhrase = titleLower.includes('সরকারি চাকরি') || titleLower.includes('govt job');
+  const isBankPhrase = titleLower.includes('ব্যাংক চাকরির খবর') || titleLower.includes('bank job');
+
+  if ((hasGovtTag || isGovtPhrase) && !categories.includes('Government')) categories.push('Government');
+  if (hasBankTag || isBankPhrase) {
+    if (!categories.includes('Bank')) categories.push('Bank');
+    if (!(hasGovtTag || isGovtPhrase) && !categories.includes('Private')) categories.push('Private');
+  }
+  if (termNames.some((n: string) => n.includes('ngo') || n.includes('এনজিও')) || titleLower.includes('ngo') || titleLower.includes('এনজিও')) {
+    if (!categories.includes('NGO')) categories.push('NGO');
+  }
+  const privateKeywords = ['private', 'company', 'limited', 'group', 'pvt', 'financial', 'insurance', 'সীমিত', 'গ্রুপ', 'লিমিটেড', 'কোম্পানি', 'বীমা'];
+  const isPrivate = termNames.some((n: string) => n.includes('বেসরকারি') || n.includes('private')) || 
+                    titleLower.includes('private') || 
+                    privateKeywords.some(k => titleLower.includes(k) || termNames.some(t => t.includes(k)));
+  if (isPrivate && !categories.includes('Private') && !categories.includes('Bank') && !categories.includes('Government') && !categories.includes('NGO')) {
+    categories.push('Private');
+  }
+  if (categories.length === 0) categories.push('General');
+
+  const cleanContent = rawContent
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '') // Double pass for safety
+    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+    .replace(/<a\b[^>]*>(.*?)<\/a>/gi, '$1')
+    .replace(/<ins\b[^<]*(?:(?!<\/ins>)<[^<]*)*<\/ins>/gi, '')
+    .replace(/Source:|Powered by|Originally published on|See original post/gi, '')
+    .trim();
+
+  const remainingDays = extractFromTableOrText(['কয়দিন বাকি', 'আবেদনের সময় বাকি', 'সময় বাকি', 'Time Remaining', 'Remaining Days', 'Days Remaining']);
+  const startTime = extractFromTableOrText(['আবেদন শুরুর তারিখ', 'আবেদন শুরু তারিখ', 'আবেদন শুরু', 'শুরু', 'Start Date', 'StartTime']) || "চলমান";
+  const applyMethod = extractFromTableOrText(['আবেদনের পদ্ধতি', 'আবেদন পদ্ধতি', 'পদ্ধতি', 'How to Apply', 'Apply Method']) || "অনলাইনে / ডাকযোগে";
+  const noticeSource = extractFromTableOrText(['বিজ্ঞপ্তির সোর্স', 'সূত্র', 'সোর্স', 'Source']) || "অনলাইন / অফিসিয়াল ওয়েবসাইট";
+  
+  let orgName = extractFromTableOrText(['প্রতিষ্ঠানের নাম', 'প্রতিষ্ঠান', 'Organisation', 'Organization', 'Company Name']);
+  if (!orgName) {
+    orgName = title.split(/Job|Circular|নিয়োগ|বিজ্ঞপ্তি/i)[0].trim();
+    if (!orgName || orgName.length < 3) orgName = sourceName;
+  }
+
+  let applyLink = "https://jobs.talukdaracademy.com.bd";
+  
+  const commonDomains = ['teletalk.com.bd', 'apply', 'registration', 'form', 'jobs.'];
+  $('a').each((_, el) => {
+    const href = $(el).attr('href') || '';
+    const text = $(el).text().toLowerCase();
+    if (commonDomains.some(d => href.includes(d)) || text.includes('apply online') || text.includes('আবেদন করুন')) {
+      applyLink = href;
+      return false;
+    }
+  });
+
+  if (cleanContent.length > 50) {
+    return {
+      id: `${post.id}`,
+      slug: generateSlug(titleText, orgName, `${post.id}`, post.slug ? post.slug.toString() : null),
+      title: titleText,
+      organization: orgName,
+      publishedDate: pubDate.toISOString(), // Standard ISO format
+      deadline: deadline,
+      deadlineISO: deadlineDate ? deadlineDate.toISOString() : null,
+      remainingDays: remainingDays,
+      startTime: startTime,
+      applyMethod: applyMethod,
+      noticeSource: noticeSource,
+      applyLink: applyLink,
+      source: categories.join(','),
+      link: post.link,
+      location: 'Bangladesh',
+      content: cleanContent,
+      imageUrls: imageUrls
+    };
+  }
+  return null;
+}
+
+let cachedJobsFull: any[] | null = null;
+let lastFetchFull: number = 0;
+let cachedJobsBrief: any[] | null = null;
+let lastFetchBrief: number = 0;
+const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+
+async function fetchJobsFromWP(isFull: boolean = false, forceRefresh: boolean = false) {
+  const now = Date.now();
+  if (!forceRefresh) {
+    if (isFull) {
+      if (cachedJobsFull && now - lastFetchFull < CACHE_TTL) {
+        return cachedJobsFull;
+      }
+    } else {
+      if (cachedJobsBrief && now - lastFetchBrief < CACHE_TTL) {
+        return cachedJobsBrief;
+      }
+    }
+  }
+
+  const jobs: any[] = [];
+
+// List of WP-API sources for full content
+  const sources = [
+    { name: 'BD Govt Job', baseUrl: 'https://bdgovtjob.net/wp-json/wp/v2/posts?_embed' }
+  ];
+
+  const seenTitles = new Set();
+  const today = new Date();
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(today.getDate() - 30);
+  
+  const targetCount = isFull ? 1000 : 400;
+  const maxSearchPages = isFull ? 30 : 10; // Increase page limit to account for all items
+
+  for (const source of sources) {
+    try {
+      console.log(`Fetching from: ${source.name} (Full: ${isFull})...`);
+      
+      // Fetch multiple pages until we hit target or limit
+      for (let page = 1; page <= maxSearchPages; page++) {
+        if (jobs.length >= targetCount) break;
+
+        const response = await axios.get(`${source.baseUrl}&per_page=100&page=${page}`, { 
+          httpsAgent, 
+          timeout: 40000,
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+        });
+        
+        if (Array.isArray(response.data) && response.data.length > 0) {
+          response.data.forEach((post: any) => {
+            if (jobs.length >= targetCount) return;
+            const title = post.title?.rendered || "Job Circular";
+            const titleText = title.replace(/&#8211;/g, '-').replace(/&#8217;/g, "'").replace(/<\/?[^>]+(>|$)/g, "").trim();
+            if (seenTitles.has(titleText.toLowerCase())) return;
+            seenTitles.add(titleText.toLowerCase());
+
+            const job = processWpPost(post, source.name, thirtyDaysAgo, today, parseDeadline);
+            if (job) jobs.push(job);
+          });
+          console.log(`Page ${page} Result: We now have ${jobs.length} valid jobs total.`);
+        } else {
+          break; // No more pages
+        }
+      }
+    } catch (e: any) {
+      if (e.code === 'ECONNABORTED' || e.message?.includes('timeout') || e.message?.includes('aborted')) {
+        console.error(`${source.name} API timed out or aborted.`);
+      } else {
+        console.error(`${source.name} API failed:`, e.response?.status, e.message);
+      }
+    }
+  }
+
+  if (jobs.length > 0) {
+    const result = jobs;
+    if (isFull) {
+      cachedJobsFull = result;
+      lastFetchFull = Date.now();
+    } else {
+      cachedJobsBrief = result;
+      lastFetchBrief = Date.now();
+    }
+    return result;
+  }
+
+
+  // Final fallback to RSS if all Direct APIs failed
+  try {
+    const rssUrl = 'https://bdgovtjob.net/feed/';
+    console.log("Attempting RSS fallback...");
+    const response = await axios.get(`https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(rssUrl)}`, { timeout: 10000 });
+    if (response.data?.status === 'ok' && Array.isArray(response.data.items)) {
+      response.data.items.forEach((item: any, i: number) => {
+        const rawContent = item.content || item.description || "";
+        const pubDate = new Date(item.pubDate);
+        jobs.push({
+          id: `rss-${i}`,
+          slug: generateSlug(item.title.replace(/&#8211;/g, '-').replace(/&#8217;/g, "'"), "Job Circular", `rss-${i}`),
+          title: item.title.replace(/&#8211;/g, '-').replace(/&#8217;/g, "'"),
+          organization: "Job Circular",
+          publishedDate: pubDate.toISOString(),
+          deadline: "See Details",
+          source: item.title.toLowerCase().includes('govt') ? 'Government' : 'General',
+          link: item.link,
+          location: 'Bangladesh',
+          content: rawContent.replace(/<a\b[^>]*>(.*?)<\/a>/gi, '$1').trim(),
+          imageUrls: [item.thumbnail || item.enclosure?.link || null].filter(Boolean)
+        });
+      });
+      const result = jobs;
+      if (isFull) {
+        cachedJobsFull = result;
+        lastFetchFull = Date.now();
+      } else {
+        cachedJobsBrief = result;
+        lastFetchBrief = Date.now();
+      }
+      return result;
+    }
+  } catch (e: any) {
+    console.error('RSS fallback failed:', e.message);
+  }
+
+  const todayDate = new Date().toISOString();
+  const fallbackResult = [
+    {
+      id: "f1",
+      slug: generateSlug("Assistant Director (General) - 100 Posts"),
+      title: "Assistant Director (General) - 100 Posts",
+      organization: "Bangladesh Bank",
+      publishedDate: todayDate,
+      deadline: "May 25, 2026",
+      source: "Bank",
+      link: "https://bdgovtjob.net/",
+      location: "Dhaka",
+      content: "Official recruitment for Assistant Director positions at Bangladesh Bank."
+    }
+  ];
+  if (isFull) {
+    cachedJobsFull = fallbackResult;
+    lastFetchFull = Date.now();
+  } else {
+    cachedJobsBrief = fallbackResult;
+    lastFetchBrief = Date.now();
+  }
+  return fallbackResult;
+}
+
+const singleJobMapCache = new Map<string, { job: any | null, timestamp: number }>();
+const SINGLE_JOB_CACHE_TTL = 1 * 60 * 60 * 1000; // 1 hour buffer
+
+async function fetchLatestJobs(isFull: boolean = false, isAdmin: boolean = false) {
+  try {
+    const jobsFilePath = path.join(os.tmpdir(), 'jobs.json');
+    if (fs.existsSync(jobsFilePath)) {
+      const data = await fs.promises.readFile(jobsFilePath, 'utf8');
+      const jobs = JSON.parse(data);
+      if (Array.isArray(jobs) && jobs.length > 0) {
+        return jobs;
+      }
+    }
+  } catch (error) {
+    console.error("Failed to read static jobs.json:", error);
+  }
+  return await fetchJobsFromWP(isFull);
+}
+
+async function fetchSingleJob(slugOrId: string) {
+  const now = Date.now();
+
+  // Check the single item MISS/HIT cache
+  if (singleJobMapCache.has(slugOrId)) {
+    const cachedItem = singleJobMapCache.get(slugOrId)!;
+    if (now - cachedItem.timestamp < SINGLE_JOB_CACHE_TTL) {
+       console.log("Serving single job from MapCache (buffer hit/miss)...");
+       return cachedItem.job;
+    } else {
+       singleJobMapCache.delete(slugOrId);
+    }
+  }
+
+  // Check cached jobs file first
+  try {
+    const jobsFilePath = path.join(os.tmpdir(), 'jobs.json');
+    if (fs.existsSync(jobsFilePath)) {
+      const data = await fs.promises.readFile(jobsFilePath, 'utf8');
+      const jobs = JSON.parse(data);
+      if (Array.isArray(jobs)) {
+         const job = jobs.find(j => String(j.id) === String(slugOrId) || j.slug === slugOrId);
+         if (job && job.content) {
+            singleJobMapCache.set(slugOrId, { job: job, timestamp: now });
+            return job;
+         }
+      }
+    }
+  } catch (error) {}
+
+  // Check full cache first
+  if (cachedJobsFull) {
+    const job = cachedJobsFull.find(j => String(j.id) === String(slugOrId) || j.slug === slugOrId);
+    if (job && job.content) {
+      singleJobMapCache.set(slugOrId, { job: job, timestamp: now });
+      return job;
+    }
+  }
+  
+  if (cachedJobsBrief) {
+    const job = cachedJobsBrief.find(j => String(j.id) === String(slugOrId) || j.slug === slugOrId);
+    if (job && job.content) {
+      singleJobMapCache.set(slugOrId, { job: job, timestamp: now });
+      return job;
+    }
+  }
+
+  // Fetch from WP API
+  try {
+    const isId = /^\d+$/.test(slugOrId);
+    const endpoint = isId
+      ? `https://bdgovtjob.net/wp-json/wp/v2/posts/${slugOrId}?_embed`
+      : `https://bdgovtjob.net/wp-json/wp/v2/posts?slug=${encodeURIComponent(slugOrId)}&_embed`;
+    
+    console.log("Fetching single job from API:", endpoint);
+    const response = await axios.get(endpoint, { timeout: 15000 });
+    const post = isId ? response.data : (Array.isArray(response.data) ? response.data[0] : null);
+    
+    if (post) {
+      const today = new Date();
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(today.getDate() - 30);
+      
+      const parseLib = (str: string) => {
+        // dummy parser returning null to bypass deadline filter, since it's a specific requested post
+        return null; 
+      };
+
+      const job = processWpPost(post, 'BD Govt Job', thirtyDaysAgo, today, parseLib);
+      if (job) {
+        singleJobMapCache.set(slugOrId, { job: job, timestamp: now });
+        return job;
+      }
+    }
+  } catch (e: any) {
+    console.error("Failed to fetch single job from API:", e.message);
+  }
+  
+  singleJobMapCache.set(slugOrId, { job: null, timestamp: now });
+  return null;
+}
+
+function getFallbackJobs() {
+  const today = new Date().toLocaleDateString();
+  return [
+    {
+      id: "f1",
+      slug: generateSlug("Assistant Director (General) - 100 Posts"),
+      title: "Assistant Director (General) - 100 Posts",
+      organization: "Bangladesh Bank",
+      publishedDate: today,
+      deadline: "May 25, 2026",
+      source: "Bank",
+      link: "https://bdgovtjob.net/",
+      location: "Dhaka"
+    },
+    {
+      id: "f2",
+      slug: generateSlug("Senior Officer (Circular No. 2026/04)"),
+      title: "Senior Officer (Circular No. 2026/04)",
+      organization: "Sonali Bank PLC",
+      publishedDate: today,
+      deadline: "May 20, 2026",
+      source: "Bank",
+      link: "https://bdgovtjob.net/",
+      location: "Nationwide"
+    },
+    {
+      id: "f3",
+      slug: generateSlug("Railway Assistant Station Master"),
+      title: "Railway Assistant Station Master",
+      organization: "Bangladesh Railway",
+      publishedDate: today,
+      deadline: "June 10, 2026",
+      source: "Government",
+      link: "https://bdgovtjob.net/",
+      location: "Regional"
+    }
+  ];
 }
 
 startServer();
